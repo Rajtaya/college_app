@@ -1,0 +1,925 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+<meta name="theme-color" content="#2B6CB0"/>
+<meta name="mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="default"/>
+<title>CRM Jat College</title>
+<link rel="manifest" href="manifest.json"/>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
+<style>
+:root{
+  --primary:#2B6CB0; --primary-dark:#1A365D; --primary-light:#EBF4FF;
+  --green:#276749; --green-light:#F0FFF4;
+  --amber:#744210; --amber-light:#FFFFF0;
+  --red:#C53030; --red-light:#FFF5F5;
+  --bg:#F7F9FC; --surface:#fff; --border:#E2E8F0;
+  --text:#1A202C; --muted:#718096; --subtle:#A0AEC0;
+  --font:'DM Sans',sans-serif;
+  --nav-h:64px; --header-h:56px;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;overflow:hidden}
+body{font-family:var(--font);background:var(--bg);color:var(--text);font-size:15px}
+.hidden{display:none!important}
+img{max-width:100%;border-radius:8px}
+
+/* ── SCREENS ── */
+.screen{position:fixed;inset:0;display:flex;flex-direction:column;transition:transform .3s ease,opacity .3s ease;background:var(--bg)}
+.screen.hidden{display:none}
+
+/* ── HEADER ── */
+.app-header{background:var(--primary);color:#fff;height:var(--header-h);display:flex;align-items:center;padding:0 16px;gap:12px;flex-shrink:0;position:relative}
+.header-title{font-size:16px;font-weight:600;flex:1}
+.header-back{background:none;border:none;color:#fff;font-size:22px;cursor:pointer;padding:4px;width:36px;height:36px;display:flex;align-items:center;justify-content:center;border-radius:50%}
+.header-back:active{background:rgba(255,255,255,.2)}
+.header-action{background:none;border:none;color:#fff;font-size:20px;cursor:pointer;padding:4px;width:36px;height:36px;display:flex;align-items:center;justify-content:center;border-radius:50%}
+.header-action:active{background:rgba(255,255,255,.2)}
+
+/* ── SCROLL CONTENT ── */
+.scroll-content{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding-bottom:80px}
+.scroll-content.no-nav{padding-bottom:20px}
+
+/* ── BOTTOM NAV ── */
+.bottom-nav{height:var(--nav-h);background:var(--surface);border-top:1px solid var(--border);display:flex;align-items:stretch;position:fixed;bottom:0;left:0;right:0;z-index:100}
+.nav-btn{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;cursor:pointer;border:none;background:none;color:var(--subtle);font-family:var(--font);transition:color .15s;padding:8px 4px}
+.nav-btn.active{color:var(--primary)}
+.nav-btn .nav-icon{font-size:22px;line-height:1}
+.nav-btn .nav-label{font-size:10px;font-weight:600;letter-spacing:.2px}
+.nav-badge{position:relative}
+.nav-badge::after{content:attr(data-count);position:absolute;top:-4px;right:-8px;background:var(--red);color:#fff;font-size:9px;font-weight:700;min-width:16px;height:16px;border-radius:8px;display:flex;align-items:center;justify-content:center;padding:0 3px;display:none}
+.nav-badge[data-count]::after{display:flex}
+
+/* ── CARDS ── */
+.card{background:var(--surface);border-radius:12px;margin:12px 16px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.06)}
+.card-header{padding:14px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.card-title{font-size:14px;font-weight:700;color:var(--text)}
+.card-body{padding:16px}
+
+/* ── LIST ITEMS ── */
+.list-item{padding:14px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;cursor:pointer;background:var(--surface)}
+.list-item:last-child{border-bottom:none}
+.list-item:active{background:var(--bg)}
+.list-item .li-icon{width:40px;height:40px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}
+.list-item .li-body{flex:1;min-width:0}
+.list-item .li-title{font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.list-item .li-sub{font-size:12px;color:var(--muted);margin-top:2px}
+.list-item .li-right{flex-shrink:0;text-align:right}
+
+/* ── CHIPS ── */
+.chip{display:inline-block;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:600}
+.chip-blue{background:var(--primary-light);color:var(--primary)}
+.chip-green{background:var(--green-light);color:var(--green)}
+.chip-amber{background:var(--amber-light);color:var(--amber)}
+.chip-red{background:var(--red-light);color:var(--red)}
+.chip-gray{background:#EDF2F7;color:var(--muted)}
+
+/* ── BUTTONS ── */
+.btn{width:100%;padding:14px;border-radius:12px;border:none;cursor:pointer;font-size:15px;font-family:var(--font);font-weight:600;transition:all .15s;display:flex;align-items:center;justify-content:center;gap:8px}
+.btn:active{transform:scale(.98)}
+.btn-primary{background:var(--primary);color:#fff}
+.btn-primary:disabled{background:#90CDF4;cursor:not-allowed}
+.btn-outline{background:transparent;color:var(--primary);border:2px solid var(--primary)}
+.btn-green{background:var(--green);color:#fff}
+.btn-danger{background:var(--red);color:#fff}
+.btn-sm{padding:8px 14px;font-size:13px;width:auto;border-radius:8px}
+
+/* ── FORM ── */
+.form-group{margin-bottom:14px}
+label{display:block;font-size:12px;font-weight:700;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.3px}
+input[type=text],input[type=tel],input[type=email],input[type=date],input[type=password],select,textarea{
+  width:100%;padding:12px 14px;border:1.5px solid var(--border);border-radius:10px;
+  font-size:15px;font-family:var(--font);background:var(--surface);color:var(--text);
+  outline:none;transition:border-color .15s;-webkit-appearance:none
+}
+input:focus,select:focus,textarea:focus{border-color:var(--primary)}
+textarea{resize:none;min-height:80px}
+
+/* ── ALERT ── */
+.alert{padding:12px 14px;border-radius:10px;font-size:13px;margin:12px 16px}
+.alert-success{background:var(--green-light);color:var(--green);border:1px solid #9AE6B4}
+.alert-danger{background:var(--red-light);color:var(--red);border:1px solid #FEB2B2}
+.alert-info{background:var(--primary-light);color:var(--primary);border:1px solid #BEE3F8}
+.alert-amber{background:var(--amber-light);color:var(--amber);border:1px solid #FAF089}
+
+/* ── LOGIN SCREEN ── */
+#screen-login{background:linear-gradient(160deg,var(--primary-dark) 0%,var(--primary) 100%);justify-content:flex-end}
+.login-hero{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:40px 24px}
+.login-hero .college-icon{font-size:64px;margin-bottom:16px}
+.login-hero .college-name{font-size:24px;font-weight:700;color:#fff;text-align:center}
+.login-hero .college-sub{font-size:14px;color:rgba(255,255,255,.7);text-align:center;margin-top:6px}
+.login-sheet{background:var(--surface);border-radius:24px 24px 0 0;padding:28px 24px 40px;flex-shrink:0}
+.login-sheet h2{font-size:20px;font-weight:700;margin-bottom:6px}
+.login-sheet .sub{font-size:13px;color:var(--muted);margin-bottom:22px}
+
+/* ── HOME SCREEN ── */
+.home-banner{background:linear-gradient(135deg,var(--primary) 0%,var(--primary-dark) 100%);color:#fff;padding:20px 20px 28px;margin-bottom:-16px}
+.home-banner .greeting{font-size:13px;opacity:.8;margin-bottom:2px}
+.home-banner .name{font-size:22px;font-weight:700}
+.home-banner .roll{font-size:12px;opacity:.7;font-family:monospace;margin-top:4px}
+
+.quick-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:0 16px;margin-bottom:8px}
+.qa-btn{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:6px;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,.06)}
+.qa-btn:active{transform:scale(.97)}
+.qa-btn .qa-icon{font-size:24px}
+.qa-btn .qa-label{font-size:13px;font-weight:600;color:var(--text)}
+.qa-btn .qa-sub{font-size:11px;color:var(--muted)}
+
+/* ── SUBJECT SELECTION ── */
+.pool-section{margin:12px 16px}
+.pool-title{font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;padding:0 4px}
+.subject-option{background:var(--surface);border:2px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:8px;cursor:pointer;transition:all .15s;display:flex;align-items:center;gap:12px}
+.subject-option:active{transform:scale(.99)}
+.subject-option.selected{border-color:var(--primary);background:var(--primary-light)}
+.subject-option .so-check{width:22px;height:22px;border-radius:50%;border:2px solid var(--border);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:12px;transition:all .15s}
+.subject-option.selected .so-check{background:var(--primary);border-color:var(--primary);color:#fff}
+.subject-option .so-body{flex:1}
+.subject-option .so-name{font-size:13px;font-weight:600}
+.subject-option .so-code{font-size:11px;color:var(--muted);font-family:monospace}
+
+/* ── FEE SCREEN ── */
+.fee-breakdown{background:var(--surface);border-radius:12px;margin:12px 16px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.06)}
+.fee-row{padding:12px 16px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--border);font-size:14px}
+.fee-row:last-child{border-bottom:none}
+.fee-row.total{background:#F7FAFC;font-weight:700;font-size:16px}
+.fee-row.paid{color:var(--green);font-weight:600}
+.fee-row.balance{color:var(--red);font-weight:700}
+
+/* ── NOTIFICATION ITEM ── */
+.notif-card{background:var(--surface);border-radius:12px;margin:8px 16px;padding:14px;box-shadow:0 1px 4px rgba(0,0,0,.06);border-left:4px solid var(--primary)}
+.notif-card.unread{border-left-color:var(--green)}
+.notif-card .nc-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px}
+.notif-card .nc-title{font-size:14px;font-weight:600;flex:1;padding-right:8px}
+.notif-card .nc-time{font-size:10px;color:var(--subtle);white-space:nowrap}
+.notif-card .nc-msg{font-size:13px;color:var(--muted);line-height:1.5}
+.notif-card .nc-footer{margin-top:8px;display:flex;gap:6px;align-items:center}
+.notif-card .nc-teacher{font-size:11px;color:var(--muted)}
+
+/* ── PROFILE ── */
+.profile-header{background:linear-gradient(135deg,var(--primary) 0%,var(--primary-dark) 100%);padding:28px 20px 24px;text-align:center;color:#fff}
+.profile-avatar{width:80px;height:80px;border-radius:50%;border:3px solid rgba(255,255,255,.5);margin:0 auto 12px;overflow:hidden;background:rgba(255,255,255,.2);display:flex;align-items:center;justify-content:center;font-size:32px}
+.profile-avatar img{width:100%;height:100%;object-fit:cover}
+.profile-name{font-size:20px;font-weight:700;margin-bottom:4px}
+.profile-roll{font-size:13px;opacity:.8;font-family:monospace}
+.profile-course{font-size:12px;opacity:.7;margin-top:4px}
+
+/* ── STEP PROGRESS ── */
+.steps{display:flex;justify-content:center;gap:6px;padding:12px 16px}
+.step{width:8px;height:8px;border-radius:50%;background:var(--border);transition:all .2s}
+.step.active{background:var(--primary);width:24px;border-radius:4px}
+.step.done{background:var(--green)}
+
+/* ── LOADING ── */
+.loading{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:60px 20px;gap:16px}
+.spinner{width:36px;height:36px;border:3px solid var(--border);border-top-color:var(--primary);border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ── TOAST ── */
+#toast{position:fixed;bottom:80px;left:50%;transform:translateX(-50%) translateY(20px);background:#1A202C;color:#fff;padding:10px 20px;border-radius:20px;font-size:13px;font-weight:500;opacity:0;transition:all .3s;z-index:999;white-space:nowrap;pointer-events:none}
+#toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+</style>
+</head>
+<body>
+
+<!-- TOAST -->
+<div id="toast"></div>
+
+<!-- ════════════════════════════════════
+     SCREEN 1: LOGIN
+════════════════════════════════════ -->
+<div class="screen" id="screen-login">
+  <div class="login-hero">
+    <div class="college-icon">🏛️</div>
+    <div class="college-name">CRM Jat College</div>
+    <div class="college-sub">Student Portal</div>
+  </div>
+  <div class="login-sheet">
+    <h2>Welcome Back</h2>
+    <p class="sub">Sign in with your Roll No and password</p>
+    <div id="login-alert"></div>
+    <div class="form-group">
+      <label>Roll Number</label>
+      <input type="text" id="login-rollno" placeholder="e.g. 2024001" autocomplete="username" style="text-transform:uppercase"/>
+    </div>
+    <div class="form-group">
+      <label>Password</label>
+      <input type="password" id="login-pass" placeholder="Your password" autocomplete="current-password"/>
+    </div>
+    <button class="btn btn-primary" onclick="doLogin()" id="login-btn">Sign In →</button>
+    <p style="text-align:center;font-size:12px;color:var(--muted);margin-top:14px">
+      Default password is your Roll Number (change after login)
+    </p>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════
+     SCREEN 2: PROFILE SETUP
+════════════════════════════════════ -->
+<div class="screen hidden" id="screen-profile-setup">
+  <div class="app-header">
+    <div class="header-title">Complete Your Profile</div>
+  </div>
+  <div class="steps" id="setup-steps">
+    <div class="step active" id="step-0"></div>
+    <div class="step" id="step-1"></div>
+    <div class="step" id="step-2"></div>
+  </div>
+  <div class="scroll-content no-nav" id="setup-content" style="padding:0 16px 30px"></div>
+</div>
+
+<!-- ════════════════════════════════════
+     MAIN APP (after login)
+════════════════════════════════════ -->
+<div class="screen hidden" id="screen-app">
+
+  <!-- HOME TAB -->
+  <div id="tab-home" class="hidden" style="display:flex;flex-direction:column;flex:1;overflow:hidden">
+    <div class="scroll-content">
+      <div class="home-banner">
+        <div class="greeting">Good day 👋</div>
+        <div class="name" id="home-name">Student</div>
+        <div class="roll" id="home-roll"></div>
+      </div>
+      <div style="height:16px"></div>
+      <div class="quick-actions">
+        <div class="qa-btn" onclick="switchMainTab('subjects')">
+          <div class="qa-icon">📚</div>
+          <div class="qa-label">My Subjects</div>
+          <div class="qa-sub">View selections</div>
+        </div>
+        <div class="qa-btn" onclick="switchMainTab('fee')">
+          <div class="qa-icon">💰</div>
+          <div class="qa-label">Fee Details</div>
+          <div class="qa-sub">View & pay</div>
+        </div>
+        <div class="qa-btn" onclick="switchMainTab('notifications')">
+          <div class="qa-icon">🔔</div>
+          <div class="qa-label">Notifications</div>
+          <div class="qa-sub" id="qa-notif-sub">From teachers</div>
+        </div>
+        <div class="qa-btn" onclick="switchMainTab('profile')">
+          <div class="qa-icon">👤</div>
+          <div class="qa-label">My Profile</div>
+          <div class="qa-sub">View details</div>
+        </div>
+      </div>
+      <div class="card" id="home-progress-card" style="margin-top:4px">
+        <div class="card-body">
+          <div style="font-size:13px;font-weight:700;margin-bottom:10px">📋 Profile Checklist</div>
+          <div id="home-checklist"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SUBJECTS TAB -->
+  <div id="tab-subjects" class="hidden" style="display:flex;flex-direction:column;flex:1;overflow:hidden">
+    <div class="app-header">
+      <div class="header-title">My Subjects</div>
+      <button class="header-action" onclick="showSubjectSelection()" title="Select Subjects">✏️</button>
+    </div>
+    <div class="scroll-content" id="subjects-content">
+      <div class="loading"><div class="spinner"></div><div>Loading...</div></div>
+    </div>
+  </div>
+
+  <!-- FEE TAB -->
+  <div id="tab-fee" class="hidden" style="display:flex;flex-direction:column;flex:1;overflow:hidden">
+    <div class="app-header">
+      <div class="header-title">Fee Details</div>
+    </div>
+    <div class="scroll-content" id="fee-content">
+      <div class="loading"><div class="spinner"></div><div>Loading...</div></div>
+    </div>
+  </div>
+
+  <!-- NOTIFICATIONS TAB -->
+  <div id="tab-notifications" class="hidden" style="display:flex;flex-direction:column;flex:1;overflow:hidden">
+    <div class="app-header">
+      <div class="header-title">Notifications</div>
+      <button class="header-action" onclick="loadNotifications()">🔄</button>
+    </div>
+    <div class="scroll-content" id="notifications-content">
+      <div class="loading"><div class="spinner"></div><div>Loading...</div></div>
+    </div>
+  </div>
+
+  <!-- PROFILE TAB -->
+  <div id="tab-profile" class="hidden" style="display:flex;flex-direction:column;flex:1;overflow:hidden">
+    <div class="app-header">
+      <div class="header-title">My Profile</div>
+      <button class="header-action" onclick="logout()" title="Logout">🚪</button>
+    </div>
+    <div class="scroll-content" id="profile-content">
+      <div class="loading"><div class="spinner"></div><div>Loading...</div></div>
+    </div>
+  </div>
+
+  <!-- BOTTOM NAV -->
+  <div class="bottom-nav">
+    <button class="nav-btn active" id="nav-home" onclick="switchMainTab('home')">
+      <span class="nav-icon">🏠</span><span class="nav-label">Home</span>
+    </button>
+    <button class="nav-btn" id="nav-subjects" onclick="switchMainTab('subjects')">
+      <span class="nav-icon">📚</span><span class="nav-label">Subjects</span>
+    </button>
+    <button class="nav-btn" id="nav-fee" onclick="switchMainTab('fee')">
+      <span class="nav-icon">💰</span><span class="nav-label">Fee</span>
+    </button>
+    <button class="nav-btn nav-badge" id="nav-notifications" data-count="" onclick="switchMainTab('notifications')">
+      <span class="nav-icon">🔔</span><span class="nav-label">Alerts</span>
+    </button>
+    <button class="nav-btn" id="nav-profile" onclick="switchMainTab('profile')">
+      <span class="nav-icon">👤</span><span class="nav-label">Profile</span>
+    </button>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════
+     SCREEN: SUBJECT SELECTION
+════════════════════════════════════ -->
+<div class="screen hidden" id="screen-subject-select">
+  <div class="app-header">
+    <button class="header-back" onclick="goBack()">←</button>
+    <div class="header-title">Select Subjects</div>
+    <button class="header-action" id="save-subjects-btn" onclick="saveSubjects()">💾</button>
+  </div>
+  <div id="subject-select-alert"></div>
+  <div class="scroll-content no-nav" id="subject-select-content">
+    <div class="loading"><div class="spinner"></div><div>Loading subjects...</div></div>
+  </div>
+</div>
+
+<script>
+const API = '/api/v1';
+let token    = localStorage.getItem('student_token');
+let rollNo   = localStorage.getItem('student_roll');
+let profile  = null;
+let selectedSubjects = {};  // pool_type → subject_id
+let allSubjects      = {};  // pool_type → []
+let currentMainTab   = 'home';
+let previousScreen   = null;
+
+// ── INIT ─────────────────────────────────────────────────
+window.onload = async () => {
+  if (token) {
+    profile = await fetchProfile();
+    if (profile) {
+      if (!profile.profile_complete) {
+        showScreen('screen-profile-setup');
+        initProfileSetup();
+      } else {
+        showScreen('screen-app');
+        switchMainTab('home');
+        loadHomeData();
+      }
+    } else {
+      showScreen('screen-login');
+    }
+  } else {
+    showScreen('screen-login');
+  }
+};
+
+// ── API ───────────────────────────────────────────────────
+async function api(method, path, data = null) {
+  const opts = { method, headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' } };
+  if (data) opts.body = JSON.stringify(data);
+  try {
+    const res  = await fetch(API + path, opts);
+    const json = await res.json();
+    if (!json.success && res.status === 401) { logout(); return null; }
+    return json;
+  } catch (e) { toast('Network error. Check connection.'); return null; }
+}
+
+// ── LOGIN ─────────────────────────────────────────────────
+async function doLogin() {
+  const rn   = document.getElementById('login-rollno').value.trim().toUpperCase();
+  const pass = document.getElementById('login-pass').value;
+  const btn  = document.getElementById('login-btn');
+  const alertEl = document.getElementById('login-alert');
+
+  if (!rn || !pass) { alertEl.innerHTML = '<div class="alert alert-danger">Enter Roll No and password</div>'; return; }
+
+  btn.disabled = true; btn.textContent = 'Signing in...';
+
+  const res = await fetch(API + '/auth/student-login', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ roll_no: rn, password: pass }),
+  });
+  const data = await res.json();
+  btn.disabled = false; btn.textContent = 'Sign In →';
+
+  if (data.success) {
+    token  = data.data.token;
+    rollNo = data.data.roll_no;
+    localStorage.setItem('student_token', token);
+    localStorage.setItem('student_roll',  rollNo);
+
+    if (!data.data.profile_complete) {
+      profile = await fetchProfile();
+      showScreen('screen-profile-setup');
+      initProfileSetup();
+    } else {
+      profile = await fetchProfile();
+      showScreen('screen-app');
+      switchMainTab('home');
+      loadHomeData();
+    }
+  } else {
+    alertEl.innerHTML = `<div class="alert alert-danger">${data.message}</div>`;
+  }
+}
+
+function logout() {
+  if (token) api('POST', '/auth/logout');
+  localStorage.removeItem('student_token');
+  localStorage.removeItem('student_roll');
+  token = null; rollNo = null; profile = null;
+  showScreen('screen-login');
+}
+
+// ── FETCH PROFILE ─────────────────────────────────────────
+async function fetchProfile() {
+  const res = await api('GET', '/students/profile');
+  return res?.success ? res.data : null;
+}
+
+// ── SCREEN CONTROL ────────────────────────────────────────
+function showScreen(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.add('hidden'));
+  document.getElementById(id).classList.remove('hidden');
+}
+
+function goBack() {
+  if (previousScreen) showScreen(previousScreen);
+  else { showScreen('screen-app'); }
+}
+
+// ── MAIN TAB SWITCHER ─────────────────────────────────────
+function switchMainTab(name) {
+  ['home','subjects','fee','notifications','profile'].forEach(t => {
+    document.getElementById('tab-' + t).classList.add('hidden');
+    const nb = document.getElementById('nav-' + t);
+    if (nb) nb.classList.remove('active');
+  });
+  document.getElementById('tab-' + name).classList.remove('hidden');
+  const nb = document.getElementById('nav-' + name);
+  if (nb) nb.classList.add('active');
+  currentMainTab = name;
+
+  const loaders = { subjects: loadMySubjects, fee: loadFee,
+                    notifications: loadNotifications, profile: loadProfile };
+  if (loaders[name]) loaders[name]();
+}
+
+// ── PROFILE SETUP (3 steps) ───────────────────────────────
+let setupStep = 0;
+let setupData = {};
+const STEPS = ['personal','academic','subjects'];
+
+function initProfileSetup() {
+  setupStep = 0;
+  renderSetupStep();
+}
+
+function renderSetupStep() {
+  [0,1,2].forEach(i => {
+    const el = document.getElementById('step-' + i);
+    if (i < setupStep) el.className = 'step done';
+    else if (i === setupStep) el.className = 'step active';
+    else el.className = 'step';
+  });
+
+  const content = document.getElementById('setup-content');
+
+  if (setupStep === 0) {
+    content.innerHTML = `
+      <h3 style="margin:16px 0 6px;font-size:18px">Personal Details</h3>
+      <p style="font-size:13px;color:var(--muted);margin-bottom:20px">Tell us about yourself</p>
+      <div class="form-group"><label>Full Name *</label><input type="text" id="setup-name" value="${profile?.full_name||''}" placeholder="Your full name"/></div>
+      <div class="form-group"><label>Mobile Number *</label><input type="tel" id="setup-mobile" value="${profile?.mobile||''}" placeholder="10-digit mobile"/></div>
+      <div class="form-group"><label>Email Address</label><input type="email" id="setup-email" value="${profile?.email||''}" placeholder="your@email.com"/></div>
+      <div class="form-group"><label>Date of Birth</label><input type="date" id="setup-dob" value="${profile?.dob||''}"/></div>
+      <div class="form-group"><label>Gender</label>
+        <select id="setup-gender">
+          <option value="">Select</option>
+          <option value="Male" ${profile?.gender==='Male'?'selected':''}>Male</option>
+          <option value="Female" ${profile?.gender==='Female'?'selected':''}>Female</option>
+          <option value="Other" ${profile?.gender==='Other'?'selected':''}>Other</option>
+        </select>
+      </div>
+      <div class="form-group"><label>Father's Name</label><input type="text" id="setup-father" value="${profile?.father_name||''}"/></div>
+      <div class="form-group"><label>Mother's Name</label><input type="text" id="setup-mother" value="${profile?.mother_name||''}"/></div>
+      <div class="form-group"><label>Permanent Address</label><textarea id="setup-address">${profile?.address||''}</textarea></div>
+      <button class="btn btn-primary" onclick="savePersonal()">Continue →</button>`;
+  }
+
+  else if (setupStep === 1) {
+    content.innerHTML = `
+      <h3 style="margin:16px 0 6px;font-size:18px">Academic Details</h3>
+      <p style="font-size:13px;color:var(--muted);margin-bottom:20px">Your course information</p>
+      <div class="form-group"><label>10th School</label><input type="text" id="setup-tenth" value="${profile?.tenth_school||''}" placeholder="School name"/></div>
+      <div class="form-group"><label>12th School</label><input type="text" id="setup-twelfth" value="${profile?.twelfth_school||''}" placeholder="School name"/></div>
+      <div class="form-group"><label>12th Subjects (for MDC validation)</label>
+        <input type="text" id="setup-12th-subj" value="${profile?.twelfth_subjects ? JSON.parse(profile.twelfth_subjects).join(',') : ''}" placeholder="e.g. PHY,CHEM,MATH (codes, comma separated)"/>
+        <small style="font-size:11px;color:var(--muted);margin-top:4px;display:block">Enter subject codes you studied in Class 12. Used to validate MDC selection.</small>
+      </div>
+      <div style="display:flex;gap:10px;margin-bottom:20px">
+        <button class="btn btn-outline btn-sm" onclick="setupStep--;renderSetupStep()">← Back</button>
+        <button class="btn btn-primary" onclick="saveAcademic()" style="flex:1">Continue →</button>
+      </div>`;
+  }
+
+  else if (setupStep === 2) {
+    content.innerHTML = `
+      <h3 style="margin:16px 0 6px;font-size:18px">You're all set! 🎉</h3>
+      <p style="font-size:13px;color:var(--muted);margin-bottom:20px">Profile complete. Now select your subjects.</p>
+      <div class="alert alert-success">Your profile has been saved successfully!</div>
+      <button class="btn btn-primary" onclick="goToApp()">Go to My Dashboard →</button>`;
+  }
+}
+
+async function savePersonal() {
+  const data = {
+    full_name:   document.getElementById('setup-name').value.trim(),
+    mobile:      document.getElementById('setup-mobile').value.trim(),
+    email:       document.getElementById('setup-email').value.trim(),
+    dob:         document.getElementById('setup-dob').value,
+    gender:      document.getElementById('setup-gender').value,
+    father_name: document.getElementById('setup-father').value.trim(),
+    mother_name: document.getElementById('setup-mother').value.trim(),
+    address:     document.getElementById('setup-address').value.trim(),
+  };
+  if (!data.full_name || !data.mobile) { toast('Name and mobile are required'); return; }
+
+  const res = await api('PUT', '/students/profile', data);
+  if (res?.success) { profile = res.data; setupStep = 1; renderSetupStep(); }
+  else toast(res?.message || 'Save failed');
+}
+
+async function saveAcademic() {
+  const twelfthRaw = document.getElementById('setup-12th-subj').value.trim();
+  const twelfthArr = twelfthRaw ? twelfthRaw.split(',').map(s => s.trim().toUpperCase()).filter(Boolean) : [];
+  const data = {
+    tenth_school:     document.getElementById('setup-tenth').value.trim(),
+    twelfth_school:   document.getElementById('setup-twelfth').value.trim(),
+    twelfth_subjects: JSON.stringify(twelfthArr),
+  };
+  const res = await api('PUT', '/students/profile', data);
+  if (res?.success) { profile = res.data; setupStep = 2; renderSetupStep(); }
+  else toast(res?.message || 'Save failed');
+}
+
+function goToApp() {
+  showScreen('screen-app');
+  switchMainTab('home');
+  loadHomeData();
+}
+
+// ── HOME ─────────────────────────────────────────────────
+async function loadHomeData() {
+  if (!profile) profile = await fetchProfile();
+  if (!profile) return;
+
+  document.getElementById('home-name').textContent = profile.full_name || 'Student';
+  document.getElementById('home-roll').textContent = 'Roll No: ' + (profile.roll_no || '');
+
+  // Checklist
+  const checks = [
+    { label: 'Profile complete', done: !!profile.profile_complete },
+    { label: 'Mobile verified',  done: !!profile.mobile },
+    { label: 'Faculty selected', done: !!profile.faculty_id },
+    { label: 'Subjects chosen',  done: false }, // will check below
+  ];
+
+  const subjRes = await api('GET', '/students/subjects');
+  const hasSubjects = subjRes?.data?.length > 0;
+  checks[3].done = hasSubjects;
+
+  document.getElementById('home-checklist').innerHTML = checks.map(c => `
+    <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">
+      <span style="font-size:18px">${c.done ? '✅' : '⭕'}</span>
+      <span style="font-size:14px;color:${c.done?'var(--green)':'var(--muted)'}">${c.label}</span>
+    </div>`).join('');
+}
+
+// ── MY SUBJECTS ───────────────────────────────────────────
+async function loadMySubjects() {
+  const content = document.getElementById('subjects-content');
+  const res     = await api('GET', '/students/subjects');
+  if (!res?.success) { content.innerHTML = '<div class="alert alert-danger" style="margin:16px">Failed to load subjects</div>'; return; }
+
+  if (!res.data.length) {
+    content.innerHTML = `
+      <div style="text-align:center;padding:40px 20px">
+        <div style="font-size:48px;margin-bottom:16px">📚</div>
+        <div style="font-size:17px;font-weight:600;margin-bottom:8px">No subjects selected yet</div>
+        <div style="font-size:13px;color:var(--muted);margin-bottom:24px">Tap the edit button to select your subjects</div>
+        <button class="btn btn-primary btn-sm" style="width:auto;padding:12px 24px" onclick="showSubjectSelection()">Select Subjects</button>
+      </div>`;
+    return;
+  }
+
+  const pools = {};
+  res.data.forEach(s => { if (!pools[s.pool_type]) pools[s.pool_type] = []; pools[s.pool_type].push(s); });
+  const poolLabels = { MAJOR:'Major Subjects', MINOR:'Minor Subjects', VAC:'Value Added Courses', SEC:'Skill Enhancement Courses', MDC:'Multi-Disciplinary Courses', AEC:'Ability Enhancement Courses' };
+  const poolColors = { MAJOR:'green', MINOR:'amber', VAC:'blue', SEC:'blue', MDC:'red', AEC:'red' };
+
+  content.innerHTML = Object.entries(pools).map(([pool, subjects]) => `
+    <div class="pool-section">
+      <div class="pool-title">${poolLabels[pool] || pool}</div>
+      ${subjects.map(s => `
+        <div class="card" style="margin:0 0 8px">
+          <div style="padding:14px 16px;display:flex;align-items:center;gap:12px">
+            <div style="width:40px;height:40px;border-radius:10px;background:var(--primary-light);display:flex;align-items:center;justify-content:center;font-size:20px">📖</div>
+            <div style="flex:1">
+              <div style="font-weight:600;font-size:14px">${s.subject_name}</div>
+              <div style="font-size:11px;color:var(--muted);margin-top:2px;font-family:monospace">${s.subject_code}</div>
+            </div>
+            <div style="text-align:right">
+              <span class="chip chip-${poolColors[s.pool_type]||'blue'}">${s.pool_type}</span>
+              ${s.has_practical ? '<div style="font-size:10px;color:var(--amber);margin-top:3px">Has Practical</div>' : ''}
+            </div>
+          </div>
+        </div>`).join('')}
+    </div>`).join('');
+}
+
+// ── SUBJECT SELECTION ─────────────────────────────────────
+async function showSubjectSelection() {
+  if (!profile?.faculty_id) {
+    toast('Please complete your profile first (select faculty & course)');
+    return;
+  }
+  previousScreen = 'screen-app';
+  showScreen('screen-subject-select');
+
+  const content = document.getElementById('subject-select-content');
+  content.innerHTML = '<div class="loading"><div class="spinner"></div><div>Loading available subjects...</div></div>';
+
+  // Load current selections
+  const curRes = await api('GET', '/students/subjects');
+  selectedSubjects = {};
+  (curRes?.data || []).forEach(s => { selectedSubjects[s.pool_type] = s.subject_id; });
+
+  // Load available subjects for this faculty
+  const params = new URLSearchParams({ faculty_id: profile.faculty_id, level: profile.level });
+  const res    = await api('GET', '/subjects?' + params);
+  if (!res?.success) { content.innerHTML = '<div class="alert alert-danger" style="margin:16px">Failed to load subjects</div>'; return; }
+
+  allSubjects = {};
+  res.data.forEach(s => { if (!allSubjects[s.pool_type]) allSubjects[s.pool_type] = []; allSubjects[s.pool_type].push(s); });
+
+  renderSubjectSelection();
+}
+
+function renderSubjectSelection() {
+  const content = document.getElementById('subject-select-content');
+  const poolLabels = { MAJOR:'Major Subjects', MINOR:'Minor Subject', VAC:'Value Added Course (VAC)', SEC:'Skill Enhancement Course (SEC)', MDC:'Multi-Disciplinary Course (MDC)', AEC:'Ability Enhancement Course (AEC)' };
+  const poolMax    = { MAJOR:2, MINOR:1, VAC:1, SEC:1, MDC:1, AEC:1 };
+  const poolInfo   = {
+    MAJOR:'Select your main subjects (faculty-specific)',
+    MINOR:'Must be different from your Major subjects',
+    VAC:'Common pool — open to all faculties',
+    SEC:'Common pool — skill-based courses',
+    MDC:'Must differ from your Major & 12th subjects',
+    AEC:'Common pool — language & communication',
+  };
+
+  content.innerHTML = `
+    <div class="alert alert-info" style="margin:12px 16px 4px">
+      <strong>Selection Rules:</strong><br/>
+      • Minor ≠ Major &nbsp;•&nbsp; MDC ≠ Major &nbsp;•&nbsp; MDC ≠ 12th subjects<br/>
+      • Major/Minor are faculty-specific; VAC/SEC/MDC/AEC are common
+    </div>
+    ${Object.entries(allSubjects).map(([pool, subjects]) => `
+      <div class="pool-section">
+        <div class="pool-title">${poolLabels[pool] || pool} (max ${poolMax[pool]||1})</div>
+        <p style="font-size:11px;color:var(--muted);margin-bottom:8px;padding:0 4px">${poolInfo[pool]||''}</p>
+        ${subjects.map(s => {
+          const isSelected = selectedSubjects[pool] === s.subject_id ||
+            (pool === 'MAJOR' && Array.isArray(selectedSubjects[pool]) && selectedSubjects[pool].includes(s.subject_id));
+          return `<div class="subject-option${isSelected?' selected':''}" onclick="toggleSubject('${pool}',${s.subject_id},${poolMax[pool]||1})" id="so-${s.subject_id}">
+            <div class="so-check">${isSelected?'✓':''}</div>
+            <div class="so-body">
+              <div class="so-name">${s.subject_name}</div>
+              <div class="so-code">${s.subject_code} · ${s.credits} credits${s.has_practical?' · Has Practical':''}</div>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>`).join('')}
+    <div style="padding:0 16px 10px">
+      <button class="btn btn-primary" onclick="saveSubjects()">💾 Save Subject Selection</button>
+    </div>`;
+}
+
+function toggleSubject(pool, subjectId, maxSelect) {
+  if (maxSelect === 1) {
+    // Single select for this pool
+    if (selectedSubjects[pool] === subjectId) {
+      delete selectedSubjects[pool];
+    } else {
+      selectedSubjects[pool] = subjectId;
+    }
+  } else {
+    // Multi select (MAJOR can have up to 2)
+    if (!Array.isArray(selectedSubjects[pool])) selectedSubjects[pool] = [];
+    const idx = selectedSubjects[pool].indexOf(subjectId);
+    if (idx >= 0) {
+      selectedSubjects[pool].splice(idx, 1);
+      if (!selectedSubjects[pool].length) delete selectedSubjects[pool];
+    } else {
+      if (selectedSubjects[pool].length >= maxSelect) {
+        toast(`You can select max ${maxSelect} subjects in this pool`); return;
+      }
+      selectedSubjects[pool].push(subjectId);
+    }
+  }
+  renderSubjectSelection();
+}
+
+async function saveSubjects() {
+  const alertEl = document.getElementById('subject-select-alert');
+  const subjects = [];
+  Object.entries(selectedSubjects).forEach(([pool, val]) => {
+    if (Array.isArray(val)) val.forEach(id => subjects.push({ subject_id: id }));
+    else subjects.push({ subject_id: val });
+  });
+
+  if (!subjects.length) { toast('Please select at least one subject'); return; }
+
+  const res = await api('POST', '/students/subjects', { subjects });
+  if (res?.success) {
+    toast('Subjects saved successfully!');
+    showScreen('screen-app');
+    switchMainTab('subjects');
+  } else {
+    if (alertEl) alertEl.innerHTML = `<div class="alert alert-danger" style="margin:8px 16px">${res?.message || 'Validation failed'}</div>`;
+    toast(res?.message || 'Validation failed');
+  }
+}
+
+// ── FEE ──────────────────────────────────────────────────
+async function loadFee() {
+  const content = document.getElementById('fee-content');
+  const res     = await api('GET', '/students/fee');
+  if (!res?.success) { content.innerHTML = '<div class="alert alert-danger" style="margin:16px">Failed to load fee</div>'; return; }
+
+  const d = res.data;
+  const paid    = parseFloat(d.paid || 0);
+  const total   = parseFloat(d.total || 0);
+  const balance = parseFloat(d.balance || 0);
+
+  let html = '';
+
+  if (d.class_fee) html += `
+    <div class="fee-breakdown">
+      <div class="fee-row"><span>Class Fee</span><span>₹${n(d.class_fee.amount)}</span></div>
+    </div>`;
+
+  if (d.subject_fees?.length) {
+    html += `<div style="padding:0 16px;margin-top:8px"><div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Subject-wise Fees</div></div>
+    <div class="fee-breakdown">
+      ${d.subject_fees.map(sf => `
+        <div class="fee-row">
+          <span style="font-size:13px">${sf.subject_name}<br/><small style="color:var(--muted);font-size:11px;font-family:monospace">${sf.subject_code}</small></span>
+          <div style="text-align:right">
+            ${sf.amount ? `<div>₹${n(sf.amount)}</div>` : '<div style="color:var(--muted)">—</div>'}
+            ${sf.has_practical && sf.practical_fee ? `<div style="font-size:11px;color:var(--amber)">+₹${n(sf.practical_fee)} (Practical)</div>` : ''}
+          </div>
+        </div>`).join('')}
+    </div>`;
+  }
+
+  html += `
+    <div class="fee-breakdown" style="margin-top:8px">
+      <div class="fee-row total"><span>Total Fee</span><span>₹${n(total)}</span></div>
+      <div class="fee-row paid"><span>✅ Paid</span><span>₹${n(paid)}</span></div>
+      <div class="fee-row balance"><span>${balance > 0 ? '⚠️ Balance Due' : '✅ Fully Paid'}</span><span>₹${n(balance)}</span></div>
+    </div>`;
+
+  if (d.last_payment) html += `
+    <div class="card" style="margin-top:8px">
+      <div class="card-body">
+        <div style="font-size:13px;font-weight:700;margin-bottom:8px">Last Payment</div>
+        <div style="font-size:13px;color:var(--muted)">Receipt No: <strong style="color:var(--text);font-family:monospace">${d.last_payment.receipt_no}</strong></div>
+        <div style="font-size:13px;color:var(--muted);margin-top:4px">Date: ${new Date(d.last_payment.payment_date).toLocaleDateString('en-IN')}</div>
+      </div>
+    </div>`;
+
+  if (!d.class_fee && !d.subject_fees?.length) {
+    html = '<div style="text-align:center;padding:40px 20px"><div style="font-size:48px;margin-bottom:16px">💰</div><div style="font-size:16px;font-weight:600;margin-bottom:8px">Fee not configured yet</div><div style="font-size:13px;color:var(--muted)">Contact the college office for fee details.</div></div>';
+  }
+
+  content.innerHTML = html;
+}
+
+// ── NOTIFICATIONS ─────────────────────────────────────────
+async function loadNotifications() {
+  const content = document.getElementById('notifications-content');
+  const res     = await api('GET', '/students/notifications');
+  if (!res?.success) { content.innerHTML = '<div class="alert alert-danger" style="margin:16px">Failed to load notifications</div>'; return; }
+
+  if (!res.data.length) {
+    content.innerHTML = '<div style="text-align:center;padding:40px 20px"><div style="font-size:48px;margin-bottom:16px">🔔</div><div style="font-size:16px;font-weight:600;margin-bottom:8px">No notifications yet</div><div style="font-size:13px;color:var(--muted)">Your teachers will send updates here.</div></div>';
+    return;
+  }
+
+  content.innerHTML = res.data.map(n => `
+    <div class="notif-card">
+      <div class="nc-header">
+        <div class="nc-title">${escHtml(n.title)}</div>
+        <div class="nc-time">${timeAgo(n.sent_at)}</div>
+      </div>
+      <div class="nc-msg">${escHtml(n.message)}</div>
+      ${n.image_url ? `<img src="${n.image_url}" style="width:100%;margin-top:8px;border-radius:8px;max-height:200px;object-fit:cover"/>` : ''}
+      <div class="nc-footer">
+        <span class="chip chip-blue">👩‍🏫 ${escHtml(n.teacher_name)}</span>
+        <span class="chip chip-gray">${n.scope_type}</span>
+      </div>
+    </div>`).join('');
+}
+
+// ── PROFILE ───────────────────────────────────────────────
+async function loadProfile() {
+  if (!profile) profile = await fetchProfile();
+  if (!profile) return;
+  const content = document.getElementById('profile-content');
+  content.innerHTML = `
+    <div class="profile-header">
+      <div class="profile-avatar">
+        ${profile.photo_url ? `<img src="${profile.photo_url}" alt="Photo"/>` : '👤'}
+      </div>
+      <div class="profile-name">${profile.full_name || 'Student'}</div>
+      <div class="profile-roll">Roll No: ${profile.roll_no}</div>
+      <div class="profile-course">${profile.course_name || ''} · ${profile.level || ''}</div>
+    </div>
+    <div style="padding:16px">
+      ${infoCard('Personal Info', [
+        ['Faculty', profile.faculty_name],
+        ['Course',  profile.course_name],
+        ['Level',   profile.level],
+        ['Mobile',  profile.mobile],
+        ['Email',   profile.email],
+        ['Gender',  profile.gender],
+        ['DOB',     profile.dob ? new Date(profile.dob).toLocaleDateString('en-IN') : null],
+      ])}
+      ${infoCard('Family Info', [
+        ["Father's Name", profile.father_name],
+        ["Mother's Name", profile.mother_name],
+        ['Address',       profile.address],
+      ])}
+      ${infoCard('Academic Info', [
+        ['10th School',     profile.tenth_school],
+        ['12th School',     profile.twelfth_school],
+        ['Admission Year',  profile.admission_yr],
+      ])}
+      <button class="btn btn-outline" onclick="showScreen('screen-profile-setup');setupStep=0;renderSetupStep()" style="margin-top:8px">✏️ Edit Profile</button>
+      <button class="btn btn-danger" onclick="logout()" style="margin-top:10px">🚪 Sign Out</button>
+    </div>`;
+}
+
+function infoCard(title, rows) {
+  const validRows = rows.filter(([, v]) => v);
+  if (!validRows.length) return '';
+  return `
+    <div class="card" style="margin:0 0 12px">
+      <div class="card-header"><span class="card-title">${title}</span></div>
+      ${validRows.map(([k,v]) => `
+        <div style="padding:11px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;gap:12px">
+          <span style="font-size:12px;color:var(--muted);font-weight:600">${k}</span>
+          <span style="font-size:13px;text-align:right;flex:1">${v}</span>
+        </div>`).join('')}
+    </div>`;
+}
+
+// ── UTILS ─────────────────────────────────────────────────
+function n(v) { return Number(v || 0).toLocaleString('en-IN'); }
+function escHtml(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function timeAgo(dateStr) {
+  const diff = (Date.now() - new Date(dateStr)) / 1000;
+  if (diff < 60) return 'just now';
+  if (diff < 3600) return Math.floor(diff/60) + 'm ago';
+  if (diff < 86400) return Math.floor(diff/3600) + 'h ago';
+  return new Date(dateStr).toLocaleDateString('en-IN');
+}
+
+let toastTimer;
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg; el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 2800);
+}
+
+// PWA service worker registration
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').catch(() => {});
+}
+</script>
+</body>
+</html>
