@@ -144,9 +144,7 @@ export default function AdminDashboard({ admin, onLogout }) {
   const handleAddStudent = async (e) => {
     e.preventDefault();
     try {
-      const selectedProg = programmes.find(p => String(p.programme_id) === String(form.programme_id));
-      const finalFacultyId = studentFaculty || selectedProg?.faculty_id || '';
-      await API.post('/students', { ...form, level_id: studentLevel, faculty_id: finalFacultyId });
+      await API.post('/students', { ...form, level_id: studentLevel, faculty_id: studentFaculty });
       showMsg('Student added!'); setForm({}); setStudentLevel(''); setStudentFaculty(''); fetchStudents();
     } catch(err) { showMsg(err.response?.data?.error || 'Error', 'error'); }
   };
@@ -415,7 +413,7 @@ export default function AdminDashboard({ admin, onLogout }) {
                 <option value="">{studentLevel?'② Select Faculty':'Select Level first'}</option>
                 {faculties.map(f=><option key={f.faculty_id} value={f.faculty_id}>{f.faculty_name}</option>)}
               </select>
-              <select style={styles.input} value={form.programme_id||''} onChange={e=>{ const prog=studentProgrammes.find(p=>String(p.programme_id)===e.target.value); setForm({...form,programme_id:e.target.value,course:prog?.programme_name||''}); if(prog?.faculty_id) setStudentFaculty(String(prog.faculty_id)); }} required disabled={!studentFaculty}>
+              <select style={styles.input} value={form.programme_id||''} onChange={e=>setForm({...form,programme_id:e.target.value,course:studentProgrammes.find(p=>String(p.programme_id)===e.target.value)?.programme_name||''})} required disabled={!studentFaculty}>
                 <option value="">{studentFaculty?(studentProgrammes.length?'③ Select Programme':'No programmes found'):'Select Faculty first'}</option>
                 {studentProgrammes.map(p=><option key={p.programme_id} value={p.programme_id}>{p.programme_name}</option>)}
               </select>
@@ -594,9 +592,7 @@ export default function AdminDashboard({ admin, onLogout }) {
                   <button style={styles.addBtn} onClick={handleEnrollSave}>Save Changes</button>
                   <button style={{...styles.delBtn,padding:'0.6rem 1.2rem'}} onClick={()=>handleEnrollReset(selectedEnrollStudent)}>Reset All</button>
                 </div>
-                {['MAJOR','MIC','MDC','SEC','VAC','AEC',
-               'ELECTIVE','ELECTIVE_FINANCE','ELECTIVE_HR','ELECTIVE_MARKETING',
-               'SEMINAR','INTERNSHIP','OEC','DSC_ELECTIVE','DSC_PRACTICUM'].map(cat => {
+                {['MAJOR','MIC','MDC','SEC','VAC','AEC'].map(cat => {
                   const subjects = enrollmentDetail.filter(s => s.category === cat);
                   if (!subjects.length) return null;
                   return (

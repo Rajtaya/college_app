@@ -143,53 +143,10 @@ router.get('/enrollment/summary', async (req, res) => {
 
 router.get('/enrollment/detail/:student_id', async (req, res) => {
   try {
-    const [student] = await db.query(
-      `SELECT s.*, l.level_name, p.scheme
-       FROM students s
-       LEFT JOIN levels l ON s.level_id = l.level_id
-       LEFT JOIN programmes p ON s.programme_id = p.programme_id
-       WHERE s.student_id = ?`,
-      [req.params.student_id]
-    );
+    const [student] = await db.query('SELECT * FROM students WHERE student_id = ?', [req.params.student_id]);
     if (!student.length) return res.status(404).json({ error: 'Student not found' });
     const s = student[0];
-    const isPG = s.level_name === 'PG';
-
-    const [rows] = await db.query(
-      isPG
-        ? `SELECT sub.subject_id, sub.subject_code, sub.subject_name, sub.category,
-                  sub.credits, sub.semester, sub.discipline_id, d.discipline_name,
-                  e.enrollment_id, e.status, e.is_major, e.remarks,
-                  e.admin_modified, e.admin_note
-           FROM subjects sub
-           JOIN programme_subject_pool psp
-             ON psp.subject_id = sub.subject_id AND psp.programme_id = ?
-           LEFT JOIN disciplines d ON sub.discipline_id = d.discipline_id
-           LEFT JOIN student_subject_enrollment e
-             ON sub.subject_id = e.subject_id AND e.student_id = ?
-           WHERE sub.semester = ?
-           ORDER BY sub.category, sub.subject_code`
-        : `SELECT sub.subject_id, sub.subject_code, sub.subject_name, sub.category,
-                  sub.credits, sub.semester, sub.discipline_id, d.discipline_name,
-                  e.enrollment_id, e.status, e.is_major, e.remarks,
-                  e.admin_modified, e.admin_note
-           FROM subjects sub
-           LEFT JOIN disciplines d ON sub.discipline_id = d.discipline_id
-           LEFT JOIN student_subject_enrollment e
-             ON sub.subject_id = e.subject_id AND e.student_id = ?
-           LEFT JOIN programme_subject_pool psp
-             ON psp.subject_id = sub.subject_id AND psp.programme_id = ?
-           WHERE sub.semester = ?
-             AND (
-               (sub.category = 'MAJOR' AND sub.programme_id = ?)
-               OR (sub.category != 'MAJOR' AND sub.is_common = TRUE)
-               OR (psp.id IS NOT NULL)
-             )
-           ORDER BY sub.category, sub.subject_code`,
-      isPG
-        ? [s.programme_id, req.params.student_id, s.semester]
-        : [req.params.student_id, s.programme_id, s.semester, s.programme_id]
-    );
+    const [rows] = await db.query(`SELECT sub.subject_id, sub.subject_code, sub.subject_name, sub.category, sub.credits, sub.semester, sub.discipline_id, d.discipline_name, e.enrollment_id, e.status, e.is_major, e.remarks, e.admin_modified, e.admin_note FROM subjects sub LEFT JOIN disciplines d ON sub.discipline_id = d.discipline_id LEFT JOIN student_subject_enrollment e ON sub.subject_id = e.subject_id AND e.student_id = ? WHERE sub.semester = ? AND ((sub.category = 'MAJOR' AND sub.programme_id = ?) OR (sub.category != 'MAJOR' AND sub.is_common = TRUE)) ORDER BY sub.category, sub.subject_code`, [req.params.student_id, s.semester, s.programme_id]);
     res.json(rows);
   } catch (err) { console.error(err); res.status(500).json({ error: 'Internal server error' }); }
 });
