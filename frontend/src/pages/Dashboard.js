@@ -46,8 +46,11 @@ export default function Dashboard({ student, onLogout }) {
   const totalPresent = attendance.filter(a => a.status==='PRESENT').length;
   const overallPct = totalClasses ? ((totalPresent/totalClasses)*100).toFixed(1) : 0;
 
-  const isEnrollmentSubmitted = enrollmentSummary && enrollmentSummary.some(e => e.status !== 'PENDING');
-  const acceptedSubjects = enrollmentSummary ? enrollmentSummary.filter(e => e.status === 'ACCEPTED') : [];
+  const isEnrollmentSubmitted = student.enrollment_submitted === 1;
+  const acceptedSubjects = enrollmentSummary 
+    ? enrollmentSummary.filter(e => e.status === 'ACCEPTED' && e.is_draft === 0) 
+    : [];
+  const hasDraft = enrollmentSummary && enrollmentSummary.some(e => e.is_draft === 1);
   const adminModified = enrollmentSummary && enrollmentSummary.some(e => e.admin_modified === 1);
   const adminNote = enrollmentSummary && enrollmentSummary.find(e => e.admin_note)?.admin_note;
 
