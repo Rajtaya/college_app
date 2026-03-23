@@ -28,6 +28,15 @@ const getStudent = async (student_id) => {
   return rows[0] || null;
 };
 
+// Get student's assigned disciplines (for Scheme A/B)
+const getStudentDisciplines = async (student_id) => {
+  const [rows] = await db.query(
+    `SELECT discipline_id FROM student_disciplines WHERE student_id = ?`,
+    [student_id]
+  );
+  return rows.map(r => r.discipline_id);
+};
+
 // Strip trailing T or P to get base subject code
 const getBaseCode = (code) => {
   const c = code.trim();
@@ -77,6 +86,12 @@ router.get('/subjects/:student_id', async (req, res) => {
     const isPG   = student.level_name === 'PG';
     const scheme = student.scheme || 'A';
 
+    // For Scheme A/B — fetch student's assigned disciplines
+    let disciplineIds = [];
+    if (!isPG && ['A', 'B'].includes(scheme)) {
+      disciplineIds = await getStudentDisciplines(req.params.student_id);
+    }
+
     // PG: subjects from programme_subject_pool
     // UG: MAJOR from programme, common subjects by level
     const [subjects] = await db.query(
@@ -109,14 +124,14 @@ router.get('/subjects/:student_id', async (req, res) => {
              ON psp.subject_id = s.subject_id AND psp.programme_id = ?
            WHERE s.semester = ?
              AND (
-               (s.category = 'MAJOR' AND s.programme_id = ?)
+               (s.category = 'MAJOR' AND s.programme_id = ? AND (? = 0 OR s.discipline_id IN (?)))
                OR (s.category != 'MAJOR' AND s.is_common = TRUE AND s.level_id = ?)
                OR (psp.id IS NOT NULL)
              )
            ORDER BY s.category, s.subject_code`,
       isPG
         ? [student.programme_id, req.params.student_id, student.semester]
-        : [req.params.student_id, student.programme_id, student.semester, student.programme_id, student.level_id]
+        : [req.params.student_id, student.programme_id, student.semester, student.programme_id, disciplineIds.length, disciplineIds.length ? disciplineIds : [0], student.level_id]
     );
 
     // Add T/P pairing info for MDC, SEC, MAJOR

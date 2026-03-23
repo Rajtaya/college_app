@@ -201,7 +201,7 @@ export default function AdminDashboard({ admin, onLogout }) {
 
   const downloadTemplate = (type) => {
     const templates = {
-      students: [{ roll_no:'BCA001', name:'Rahul Sharma', email:'rahul@college.com', phone:'9876543210', level_name:'UG', faculty_name:'Science', programme_name:'BCA', semester:1, year:1, password:'password123' }],
+      students: [{ roll_no:'BA001', name:'Priya Sharma', email:'priya@college.com', phone:'9876543211', level_name:'UG', faculty_name:'Arts', programme_name:'B.A', semester:1, year:1, password:'password123', discipline_1:'Economics', discipline_2:'History', discipline_3:'English' }],
       teachers: [{ name:'Dr. Sharma', email:'sharma@college.com', phone:'9876543211', department:'Computer Science', password:'teacher123' }],
       fees: [{ roll_no:'BCA001', amount:15000, fee_type:'Tuition Fee', due_date:'2026-04-01' }],
     };
@@ -222,7 +222,7 @@ export default function AdminDashboard({ admin, onLogout }) {
       let success = 0, failed = 0;
       for (const row of rows) {
         try {
-          await API.post('/students', {
+          const studentRes = await API.post('/students', {
             roll_no: String(row.roll_no||''), name: String(row.name||''),
             email: String(row.email||''), phone: String(row.phone||''),
             course: String(row.programme_name||''),
@@ -232,6 +232,17 @@ export default function AdminDashboard({ admin, onLogout }) {
             programme_id: progMap[String(row.programme_name||'').toLowerCase()] || null,
             faculty_id: facMap[String(row.faculty_name||'').toLowerCase()] || null,
           });
+          // Assign disciplines if provided (Scheme A/B students)
+          const discNames = [row.discipline_1, row.discipline_2, row.discipline_3].filter(Boolean);
+          if (discNames.length > 0 && studentRes.data?.student_id) {
+            const discRes = await API.get('/disciplines');
+            const discMap = {};
+            discRes.data.forEach(d => { discMap[d.discipline_name.toLowerCase()] = d.discipline_id; });
+            const discIds = discNames.map(n => discMap[String(n).toLowerCase()]).filter(Boolean);
+            if (discIds.length > 0) {
+              await API.post(`/admin/students/${studentRes.data.student_id}/disciplines`, { discipline_ids: discIds });
+            }
+          }
           success++;
         } catch { failed++; }
       }

@@ -216,4 +216,34 @@ router.delete('/enrollment/reset/:student_id', async (req, res) => {
   } catch (err) { console.error(err); res.status(500).json({ error: 'Internal server error' }); }
 });
 
+
+// Assign disciplines to a student
+router.post('/students/:id/disciplines', async (req, res) => {
+  const { discipline_ids } = req.body;
+  try {
+    await db.query('DELETE FROM student_disciplines WHERE student_id = ?', [req.params.id]);
+    for (const did of discipline_ids) {
+      await db.query(
+        'INSERT IGNORE INTO student_disciplines (student_id, discipline_id) VALUES (?, ?)',
+        [req.params.id, did]
+      );
+    }
+    res.json({ message: 'Disciplines assigned successfully' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Get disciplines for a student
+router.get('/students/:id/disciplines', async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      `SELECT d.discipline_id, d.discipline_name
+       FROM student_disciplines sd
+       JOIN disciplines d ON sd.discipline_id = d.discipline_id
+       WHERE sd.student_id = ?`,
+      [req.params.id]
+    );
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 module.exports = router;
