@@ -32,7 +32,7 @@ export default function StudentEnrollment({ student, onBack }) {
 
   const [subjects, setSubjects]                 = useState([]);
   const [enrollments, setEnrollments]           = useState({});
-  const [submitted, setSubmitted]               = useState(false);
+  const [submitted, setSubmitted]               = useState(student.enrollment_submitted === 1);
   const [loading, setLoading]                   = useState(true);
   const [submitting, setSubmitting]             = useState(false);
   const [msg, setMsg]                           = useState('');
@@ -481,7 +481,7 @@ export default function StudentEnrollment({ student, onBack }) {
                 </tr>
               </thead>
               <tbody>
-                {grouped[category].map(sub => {
+                {grouped[category].filter(sub => !submitted || enrollments[sub.subject_id]?.status === "ACCEPTED").map(sub => {
                   const enroll  = enrollments[sub.subject_id] || {};
                   const status  = enroll.status || 'PENDING';
                   const isPaired = sub.pair_code !== null;

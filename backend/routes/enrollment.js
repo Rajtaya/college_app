@@ -163,7 +163,7 @@ router.get('/status/:student_id', async (req, res) => {
   if (!canAccessStudent(req, res, req.params.student_id)) return;
   try {
     const [rows] = await db.query(
-      `SELECT e.*, s.subject_code, s.subject_name, s.category,
+      `SELECT e.*, e.is_draft, s.subject_code, s.subject_name, s.category,
               s.credits, s.internal_marks, d.discipline_name
        FROM student_subject_enrollment e
        JOIN subjects s ON e.subject_id = s.subject_id
