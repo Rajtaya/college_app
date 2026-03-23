@@ -25,27 +25,11 @@ const categoryColors = {
   SEMINAR:'#553c9a', INTERNSHIP:'#234e52', OEC:'#1a365d',
 };
 
-const categoryRules = {
-  MAJOR:              'All subjects are pre-selected for your programme.',
-  MIC:                '⚠️ Select exactly 1 subject. Must be from a different discipline than your MAJOR.',
-  VAC:                '⚠️ Select exactly 1 subject.',
-  AEC:                '⚠️ Select exactly 1 subject.',
-  MDC:                '⚠️ Select 1 group only. For 2-credit: select both Theory(T) + Practical(P) together. Must be from a different discipline than your MAJOR.',
-  SEC:                '⚠️ Select 1 group only. For 2-credit: select both Theory(T) + Practical(P) together.',
-  ELECTIVE:           '⚠️ Select exactly 1 subject from the options below.',
-  ELECTIVE_FINANCE:   '⚠️ Choose 4 total from Finance, HR, or Marketing. All 4 from one area (core) or 2 from each of two areas (mixed).',
-  ELECTIVE_HR:        '⚠️ Choose 4 total from Finance, HR, or Marketing. All 4 from one area (core) or 2 from each of two areas (mixed).',
-  ELECTIVE_MARKETING: '⚠️ Choose 4 total from Finance, HR, or Marketing. All 4 from one area (core) or 2 from each of two areas (mixed).',
-  SEMINAR:            'Compulsory. Pre-selected.',
-  INTERNSHIP:         'Compulsory. Pre-selected.',
-  OEC:                '⚠️ Select exactly 1 subject.',
-};
-
 const FIXED_CATEGORIES = new Set(['SEMINAR', 'INTERNSHIP']);
-const PG_FIXED_MAJOR = true; // MAJOR is fixed for PG only
 
 export default function StudentEnrollment({ student, onBack }) {
   const isPG = student.level_id === 2;
+
   const [subjects, setSubjects]                 = useState([]);
   const [enrollments, setEnrollments]           = useState({});
   const [submitted, setSubmitted]               = useState(false);
@@ -54,6 +38,42 @@ export default function StudentEnrollment({ student, onBack }) {
   const [msg, setMsg]                           = useState('');
   const [msgType, setMsgType]                   = useState('success');
   const [validationErrors, setValidationErrors] = useState([]);
+  const [savingDraft, setSavingDraft]           = useState(false);
+  const [showConfirm, setShowConfirm]           = useState(false);
+  const [hasTriedSubmit, setHasTriedSubmit]     = useState(false);
+
+  // PG DEC live validation
+  const decFinance   = subjects.filter(s => s.category === 'ELECTIVE_FINANCE'   && enrollments[s.subject_id]?.status === 'ACCEPTED').length;
+  const decHR        = subjects.filter(s => s.category === 'ELECTIVE_HR'        && enrollments[s.subject_id]?.status === 'ACCEPTED').length;
+  const decMarketing = subjects.filter(s => s.category === 'ELECTIVE_MARKETING' && enrollments[s.subject_id]?.status === 'ACCEPTED').length;
+  const decTotal     = decFinance + decHR + decMarketing;
+  const decGroupsUsed = [decFinance, decHR, decMarketing].filter(n => n > 0);
+  const decIsCore    = decGroupsUsed.length === 1 && decGroupsUsed[0] === 4;
+  const decIsMixed   = decGroupsUsed.length === 2 && decGroupsUsed.every(n => n === 2);
+  const decValid     = decTotal === 4 && (decIsCore || decIsMixed);
+  const decMsg       = decTotal === 0
+    ? '⚠️ Select 4 DEC subjects: all 4 from one specialisation OR 2+2 from any two.'
+    : decTotal < 4
+    ? `⚠️ Select ${4 - decTotal} more DEC subject(s). Finance=${decFinance}, HR=${decHR}, Marketing=${decMarketing}`
+    : !decIsCore && !decIsMixed
+    ? `❌ Invalid combination. Choose all 4 from one group OR 2+2 from two groups. Finance=${decFinance}, HR=${decHR}, Marketing=${decMarketing}`
+    : `✅ DEC valid: Finance=${decFinance}, HR=${decHR}, Marketing=${decMarketing}`;
+
+  const categoryRules = {
+    MAJOR:              '🔒 Compulsory. All subjects are pre-selected for your programme.',
+    MIC:                '⚠️ Select exactly 1 subject. Must be from a different discipline than your MAJOR.',
+    VAC:                '⚠️ Select exactly 1 subject.',
+    AEC:                '⚠️ Select exactly 1 subject.',
+    MDC:                '⚠️ Select 1 group only. For 3-credit: select 1 subject. For 2-credit: select both Theory(T) + Practical(P) together. Must be from a different discipline than your MAJOR.',
+    SEC:                isPG ? '⚠️ Select exactly 1 SEC subject.' : '⚠️ Select 1 group only. For 3-credit: select 1 subject. For 2-credit: select both Theory(T) + Practical(P) together. No discipline restriction.',
+    ELECTIVE:           '⚠️ Select exactly 1 subject from the options below.',
+    ELECTIVE_FINANCE:   decMsg,
+    ELECTIVE_HR:        decMsg,
+    ELECTIVE_MARKETING: decMsg,
+    SEMINAR:            '🔒 Compulsory. Pre-selected.',
+    INTERNSHIP:         '🔒 Compulsory. Pre-selected.',
+    OEC:                '⚠️ Select exactly 1 subject.',
+  };
 
   useEffect(() => { fetchData(); }, []);
 
@@ -116,6 +136,18 @@ export default function StudentEnrollment({ student, onBack }) {
 
   const handleDecision = (subject_id, newStatus) => {
     if (submitted) return;
+    // Auto-accept fixed subjects
+    setEnrollments(prev => {
+      const updated = { ...prev };
+      subjects.forEach(sub => {
+        if (isFixedSubject(sub.category, sub.subject_id)) {
+          if (!updated[sub.subject_id] || updated[sub.subject_id].status === 'PENDING') {
+            updated[sub.subject_id] = { status: 'ACCEPTED', is_major: false, remarks: '' };
+          }
+        }
+      });
+      return updated;
+    });
     const sub = subjects.find(s => s.subject_id === subject_id);
     if (!sub || isFixedSubject(sub.category)) return;
 
@@ -291,7 +323,25 @@ export default function StudentEnrollment({ student, onBack }) {
       : buildUGErrors(byCategory, subjects, enrollments);
   };
 
+  const handleSaveDraft = async () => {
+    setSavingDraft(true);
+    try {
+      const payload = Object.entries(enrollments).map(([subject_id, e]) => ({
+        subject_id: parseInt(subject_id),
+        status: e.status || 'PENDING',
+        is_major: e.is_major || false,
+        remarks: e.remarks || ''
+      }));
+      await API.post(`/enrollment/save-draft/${student.student_id}`, { decisions: payload });
+      showMsg('✅ Draft saved! You can continue later.', 'success');
+    } catch (err) {
+      showMsg(err.response?.data?.error || 'Failed to save draft', 'error');
+    } finally { setSavingDraft(false); }
+  };
+
   const handleSubmit = async () => {
+    if (!showConfirm) { setHasTriedSubmit(true); setShowConfirm(true); return; }
+    setShowConfirm(false);
     const errors = validateEnrollments();
     if (errors.length > 0) { setValidationErrors(errors); return; }
     if (!window.confirm('Are you sure? This action cannot be undone. Contact admin to reset.')) return;
@@ -343,7 +393,39 @@ export default function StudentEnrollment({ student, onBack }) {
         </div>
       </div>
 
-      {msg && <div style={{...s.msg, background:msgType==='error'?'#fff5f5':'#c6f6d5', color:msgType==='error'?'#c53030':'#276749'}}>{msg}</div>}
+      {showConfirm && (
+        <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,background:'rgba(0,0,0,0.5)',zIndex:9998,display:'flex',alignItems:'center',justifyContent:'center'}}>
+          <div style={{background:'#fff',borderRadius:'16px',padding:'2rem',maxWidth:'420px',width:'90%',boxShadow:'0 8px 32px rgba(0,0,0,0.2)',textAlign:'center'}}>
+            <h3 style={{margin:'0 0 1rem',color:'#2d3748'}}>⚠️ Confirm Submission</h3>
+            <p style={{color:'#718096',margin:'0 0 1.5rem'}}>Once submitted, you <strong>cannot change</strong> your enrollment. Are you sure?</p>
+            <div style={{display:'flex',gap:'1rem',justifyContent:'center'}}>
+              <button onClick={()=>setShowConfirm(false)}
+                style={{padding:'0.75rem 2rem',borderRadius:'8px',border:'1px solid #e2e8f0',background:'#f7fafc',cursor:'pointer',fontWeight:'600',color:'#4a5568'}}>
+                Cancel
+              </button>
+              <button onClick={handleSubmit}
+                style={{padding:'0.75rem 2rem',borderRadius:'8px',border:'none',background:'#4c51bf',color:'#fff',cursor:'pointer',fontWeight:'600'}}>
+                Yes, Submit
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {msg && (
+        <div style={{
+          position:'fixed', top:'50%', left:'50%', transform:'translate(-50%, -50%)', zIndex:9999,
+          background:msgType==='error'?'#fff5f5':'#c6f6d5',
+          color:msgType==='error'?'#c53030':'#276749',
+          padding:'1rem 1.5rem', borderRadius:'12px',
+          boxShadow:'0 4px 20px rgba(0,0,0,0.15)',
+          fontWeight:'600', fontSize:'1rem',
+          display:'flex', alignItems:'center', gap:'0.5rem',
+          maxWidth:'400px', animation:'fadeIn 0.3s ease'
+        }}>
+          {msg}
+        </div>
+      )}
 
       {submitted ? (
         <div style={s.submittedBanner}>✅ <strong>Enrollment Submitted!</strong> Contact admin if you need changes.</div>
@@ -477,7 +559,7 @@ export default function StudentEnrollment({ student, onBack }) {
 
       {!submitted && subjects.length > 0 && (
         <div style={s.submitWrapper}>
-          {validationErrors.length > 0 && (
+          {hasTriedSubmit && validationErrors.length > 0 && (
             <div style={s.validationBox}>
               <h4 style={{margin:'0 0 0.5rem', color:'#c53030'}}>⚠️ Please fix these issues before submitting:</h4>
               {validationErrors.map((err,i) => <p key={i} style={s.validationErr}>{err}</p>)}
@@ -490,9 +572,16 @@ export default function StudentEnrollment({ student, onBack }) {
                 Pending: <strong style={{color:pendingCount>0?'#c53030':'#276749'}}>{pendingCount} subjects</strong>
               </p>
             </div>
-            <button style={{...s.submitBtn, opacity:submitting?0.6:1}} onClick={handleSubmit} disabled={submitting}>
-              {submitting ? '⏳ Submitting...' : '🚀 Submit Enrollment'}
-            </button>
+            <div style={{display:'flex', gap:'1rem', flexWrap:'wrap'}}>
+              <button
+                style={{...s.submitBtn, background:'#4a5568', opacity:savingDraft?0.6:1}}
+                onClick={handleSaveDraft} disabled={savingDraft || submitting}>
+                {savingDraft ? '⏳ Saving...' : '💾 Save Draft'}
+              </button>
+              <button style={{...s.submitBtn, opacity:submitting?0.6:1}} onClick={handleSubmit} disabled={submitting}>
+                {submitting ? '⏳ Submitting...' : '🚀 Submit Enrollment'}
+              </button>
+            </div>
           </div>
         </div>
       )}

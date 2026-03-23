@@ -176,6 +176,33 @@ router.get('/status/:student_id', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// POST /enrollment/save-draft/:student_id
+router.post('/save-draft/:student_id', verify('student', 'admin'), async (req, res) => {
+  const { decisions } = req.body;
+  try {
+    const [studentRows] = await db.query(
+      'SELECT * FROM students WHERE student_id = ?', [req.params.student_id]
+    );
+    if (!studentRows.length) return res.status(404).json({ error: 'Student not found' });
+    if (studentRows[0].enrollment_submitted)
+      return res.status(400).json({ error: 'Enrollment already submitted and locked' });
+
+    for (const d of decisions) {
+      await db.query(
+        `INSERT INTO student_subject_enrollment
+         (student_id, subject_id, status, is_major, remarks, is_draft)
+         VALUES (?, ?, ?, ?, ?, 1)
+         ON DUPLICATE KEY UPDATE
+         status=VALUES(status), is_major=VALUES(is_major),
+         remarks=VALUES(remarks), is_draft=1`,
+        [req.params.student_id, d.subject_id, d.status || 'PENDING',
+         d.is_major || 0, d.remarks || null]
+      );
+    }
+    res.json({ message: 'Draft saved successfully' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // POST /enrollment/submit/:student_id
 router.post('/submit/:student_id', verify('student', 'admin'), async (req, res) => {
   if (!canAccessStudent(req, res, req.params.student_id)) return;
@@ -254,6 +281,35 @@ router.post('/submit/:student_id', verify('student', 'admin'), async (req, res) 
       if (subjectDetails.some(s => s.category === 'ELECTIVE')) {
         if (elective.length === 0) errors.push('❌ Elective: Must select 1 subject');
         else if (elective.length > 1) errors.push(`❌ Elective: Select only 1 (selected ${elective.length})`);
+      }
+
+      // DEC Sem 3: must pick exactly 4 from ELECTIVE_FINANCE/HR/MARKETING
+      // Rule: all 4 from one group (core) OR 2+2 from any two groups (mixed)
+      const decFinance    = (byCategory['ELECTIVE_FINANCE']    || []).length;
+      const decHR         = (byCategory['ELECTIVE_HR']         || []).length;
+      const decMarketing  = (byCategory['ELECTIVE_MARKETING']  || []).length;
+      const decTotal      = decFinance + decHR + decMarketing;
+      const hasDecSubjects = subjectDetails.some(s =>
+        ['ELECTIVE_FINANCE','ELECTIVE_HR','ELECTIVE_MARKETING'].includes(s.category)
+      );
+
+      if (hasDecSubjects) {
+        if (decTotal !== 4) {
+          errors.push(`❌ DEC: Must select exactly 4 elective subjects (selected ${decTotal})`);
+        } else {
+          // Check valid combinations
+          const groupsUsed = [decFinance, decHR, decMarketing].filter(n => n > 0);
+          const isCore  = groupsUsed.length === 1 && groupsUsed[0] === 4; // all 4 from one group
+          const isMixed = groupsUsed.length === 2 &&
+                          groupsUsed.every(n => n === 2);                  // 2+2 from two groups
+          if (!isCore && !isMixed) {
+            errors.push(
+              '❌ DEC: Invalid combination. Choose either: ' +
+              '4 from one specialisation (Core) OR 2 from each of any two specialisations (Mixed). ' +
+              `Current: Finance=${decFinance}, HR=${decHR}, Marketing=${decMarketing}`
+            );
+          }
+        }
       }
 
       // OEC: exactly 1 (Sem 3)
@@ -433,12 +489,13 @@ router.post('/submit/:student_id', verify('student', 'admin'), async (req, res) 
     for (const e of enrollments) {
       await db.query(
         `INSERT INTO student_subject_enrollment
-           (student_id, subject_id, status, is_major, remarks)
-         VALUES (?, ?, ?, ?, ?)
+           (student_id, subject_id, status, is_major, remarks, is_draft)
+         VALUES (?, ?, ?, ?, ?, 0)
          ON DUPLICATE KEY UPDATE
            status = VALUES(status),
            is_major = VALUES(is_major),
-           remarks = VALUES(remarks)`,
+           remarks = VALUES(remarks),
+           is_draft = 0`,
         [req.params.student_id, e.subject_id, e.status, e.is_major || false, e.remarks || '']
       );
     }
