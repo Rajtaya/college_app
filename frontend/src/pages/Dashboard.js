@@ -5,6 +5,8 @@ import StudentEnrollment from './StudentEnrollment';
 export default function Dashboard({ student, onLogout }) {
   const [activeTab, setActiveTab] = useState('overview');
   const [attendance, setAttendance] = useState([]);
+  const [fees, setFees] = useState([]);
+  const [marks, setMarks] = useState([]);
   const [enrollmentSummary, setEnrollmentSummary] = useState(null);
   const [loading, setLoading] = useState(false);
   const [showEnrollment, setShowEnrollment] = useState(false);
@@ -12,9 +14,21 @@ export default function Dashboard({ student, onLogout }) {
   useEffect(() => {
     if (activeTab === 'attendance') fetchAttendance();
     if (activeTab === 'subjects') fetchEnrollmentSummary();
+    if (activeTab === 'fees') fetchFees();
+    if (activeTab === 'marks') fetchMarks();
   }, [activeTab]);
 
   useEffect(() => { fetchEnrollmentSummary(); }, []);
+
+  const fetchMarks = async () => {
+    try { const r = await API.get(`/marks/student/${student.student_id}`); setMarks(r.data); }
+    catch(e) {}
+  };
+
+  const fetchFees = async () => {
+    try { const r = await API.get(`/fees/student/${student.student_id}`); setFees(r.data); }
+    catch(e) {}
+  };
 
   const fetchAttendance = async () => {
     setLoading(true);
@@ -118,10 +132,10 @@ export default function Dashboard({ student, onLogout }) {
       </nav>
 
       <div style={styles.tabs}>
-        {['overview','subjects','attendance'].map(tab => (
+        {['overview','subjects','attendance','fees','marks'].map(tab => (
           <button key={tab} style={{...styles.tab, ...(activeTab===tab?styles.activeTab:{})}}
             onClick={() => setActiveTab(tab)}>
-            {tab==='overview'?'🏠 Overview':tab==='subjects'?'📚 My Subjects':'📅 Attendance'}
+            {tab==='overview'?'🏠 Overview':tab==='subjects'?'📚 My Subjects':tab==='attendance'?'📅 Attendance':tab==='fees'?'💰 Fees':'📊 Marks'}
           </button>
         ))}
       </div>
@@ -164,10 +178,15 @@ export default function Dashboard({ student, onLogout }) {
                 <p>Overall: {overallPct}%</p>
                 <p style={styles.cardArrow}>→ Click to view</p>
               </div>
-              <div style={{...styles.card, background:'#9f7aea'}}>
+              <div style={{...styles.card, background:'#9f7aea'}} onClick={() => setActiveTab('marks')}>
                 <h3>📊 Marks</h3>
-                <p>View exam results</p>
-                <p style={styles.cardArrow}>Coming soon</p>
+                <p>Internal, Assignment & Practical</p>
+                <p style={styles.cardArrow}>→ Click to view</p>
+              </div>
+              <div style={{...styles.card, background:'#dd6b20'}} onClick={() => setActiveTab('fees')}>
+                <h3>💰 Fees</h3>
+                <p>{fees.filter(f=>f.status!=='PAID').length > 0 ? `⚠️ ${fees.filter(f=>f.status!=='PAID').length} pending` : '✅ All paid'}</p>
+                <p style={styles.cardArrow}>→ Click to view</p>
               </div>
             </div>
           </div>
@@ -351,6 +370,113 @@ export default function Dashboard({ student, onLogout }) {
             )}
           </div>
         )}
+        {activeTab === 'marks' && (
+          <div>
+            <div style={{background:'#fff',borderRadius:'12px',padding:'1.5rem',marginBottom:'1.5rem',boxShadow:'0 2px 8px rgba(0,0,0,0.08)'}}>
+              <h2 style={{margin:'0 0 0.25rem'}}>📊 My Marks</h2>
+              <p style={{margin:'0 0 1rem',color:'#718096',fontSize:'0.85rem'}}>Internal, Assignment and Practical Internal marks are shown here. External marks are released after results.</p>
+              {marks.length === 0 ? (
+                <div style={styles.emptyState}>📭 No marks available yet.</div>
+              ) : (() => {
+                // Group by subject
+                const subjectMap = {};
+                marks.forEach(m => {
+                  if (!subjectMap[m.subject_id]) subjectMap[m.subject_id] = { name:m.subject_name, code:m.subject_code, category:m.category, marks:{} };
+                  subjectMap[m.subject_id].marks[m.exam_type] = { obtained: m.marks_obtained, max: m.max_marks };
+                });
+                const examTypes = ['INTERNAL','ASSIGNMENT','PRACTICAL_INTERNAL'];
+                const presentTypes = examTypes.filter(t => marks.some(m => m.exam_type === t));
+                const getGrade = (pct) => pct>=90?{g:'O',c:'#276749'}:pct>=80?{g:'A+',c:'#2b6cb0'}:pct>=70?{g:'A',c:'#2b6cb0'}:pct>=60?{g:'B+',c:'#92400e'}:pct>=50?{g:'B',c:'#92400e'}:pct>=40?{g:'C',c:'#c53030'}:{g:'F',c:'#c53030'};
+                return (
+                  <table style={styles.table}>
+                    <thead>
+                      <tr>
+                        <th style={styles.th}>Course Code</th>
+                        <th style={styles.th}>Subject</th>
+                        {presentTypes.map(t=>(
+                          <th key={t} style={styles.th}>
+                            {t==='INTERNAL'?'Internal':t==='ASSIGNMENT'?'Assignment':'Practical'}
+                          </th>
+                        ))}
+                        <th style={styles.th}>Total %</th>
+                        <th style={styles.th}>Grade</th>
+                      </tr>
+                    </thead>
+                    <tbody>{Object.values(subjectMap).map((sub,i) => {
+                      let totalObt=0, totalMax=0;
+                      presentTypes.forEach(t => { if (sub.marks[t]) { totalObt+=Number(sub.marks[t].obtained); totalMax+=Number(sub.marks[t].max); } });
+                      const pct = totalMax>0 ? Number(((totalObt/totalMax)*100).toFixed(1)) : null;
+                      const grade = pct !== null ? getGrade(pct) : null;
+                      return (
+                        <tr key={i} style={{background:i%2===0?'#fff':'#f7fafc'}}>
+                          <td style={{...styles.td,fontFamily:'monospace',fontWeight:'700',fontSize:'0.82rem'}}>{sub.code}</td>
+                          <td style={styles.td}>{sub.name}</td>
+                          {presentTypes.map(t=>(
+                            <td key={t} style={{...styles.td,textAlign:'center'}}>
+                              {sub.marks[t]
+                                ? <span style={{fontWeight:'600'}}>{sub.marks[t].obtained}<span style={{color:'#a0aec0',fontWeight:'400'}}>/{sub.marks[t].max}</span></span>
+                                : <span style={{color:'#a0aec0'}}>—</span>}
+                            </td>
+                          ))}
+                          <td style={{...styles.td,textAlign:'center',fontWeight:'700',color:pct>=60?'#276749':pct>=40?'#92400e':'#c53030'}}>
+                            {pct !== null ? `${pct}%` : '—'}
+                          </td>
+                          <td style={{...styles.td,textAlign:'center'}}>
+                            {grade ? <span style={{background:grade.c,color:'#fff',padding:'0.2rem 0.6rem',borderRadius:'6px',fontWeight:'700',fontSize:'0.85rem'}}>{grade.g}</span> : '—'}
+                          </td>
+                        </tr>
+                      );
+                    })}</tbody>
+                  </table>
+                );
+              })()}
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'fees' && (
+          <div>
+            <div style={{background:'#fff',borderRadius:'12px',padding:'1.5rem',marginBottom:'1.5rem',boxShadow:'0 2px 8px rgba(0,0,0,0.08)'}}>
+              <h2 style={{margin:'0 0 1rem'}}>💰 My Fees</h2>
+              <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(140px,1fr))',gap:'1rem',marginBottom:'1rem'}}>
+                {[
+                  {label:'Total Amount', value:`₹${fees.reduce((s,f)=>s+Number(f.amount),0).toLocaleString()}`, bg:'#ebf8ff', color:'#2b6cb0'},
+                  {label:'Paid', value:`₹${fees.filter(f=>f.status==='PAID').reduce((s,f)=>s+Number(f.amount),0).toLocaleString()}`, bg:'#f0fff4', color:'#276749'},
+                  {label:'Pending', value:`₹${fees.filter(f=>f.status==='PENDING').reduce((s,f)=>s+Number(f.amount),0).toLocaleString()}`, bg:'#fffbeb', color:'#92400e'},
+                  {label:'Overdue', value:`₹${fees.filter(f=>f.status==='OVERDUE').reduce((s,f)=>s+Number(f.amount),0).toLocaleString()}`, bg:'#fff5f5', color:'#c53030'},
+                ].map(item=>(
+                  <div key={item.label} style={{background:item.bg,borderRadius:'10px',padding:'1rem',textAlign:'center'}}>
+                    <p style={{fontSize:'1.3rem',fontWeight:'700',margin:0,color:item.color}}>{item.value}</p>
+                    <p style={{fontSize:'0.8rem',color:'#718096',margin:'0.25rem 0 0'}}>{item.label}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+            {fees.length === 0 ? (
+              <div style={styles.emptyState}>💰 No fee records found.</div>
+            ) : (
+              <table style={styles.table}>
+                <thead><tr>{['Fee Type','Amount','Due Date','Paid Date','Status','Ref No'].map(h=><th key={h} style={styles.th}>{h}</th>)}</tr></thead>
+                <tbody>{fees.map(f=>(
+                  <tr key={f.fee_id} style={{background:f.status==='OVERDUE'?'#fff5f5':f.status==='PAID'?'#f0fff4':'#fff'}}>
+                    <td style={styles.td}><strong>{f.fee_type}</strong></td>
+                    <td style={{...styles.td,fontWeight:'700'}}>₹{Number(f.amount).toLocaleString()}</td>
+                    <td style={styles.td}>{f.due_date ? new Date(f.due_date).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'}) : '—'}</td>
+                    <td style={styles.td}>{f.paid_date ? new Date(f.paid_date).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'}) : '—'}</td>
+                    <td style={styles.td}>
+                      <span style={{padding:'0.25rem 0.75rem',borderRadius:'999px',color:'#fff',fontSize:'0.8rem',fontWeight:'600',
+                        background:f.status==='PAID'?'#48bb78':f.status==='OVERDUE'?'#e53e3e':'#ed8936'}}>
+                        {f.status==='PAID'?'✅ Paid':f.status==='OVERDUE'?'🔴 Overdue':'⏳ Pending'}
+                      </span>
+                    </td>
+                    <td style={{...styles.td,fontFamily:'monospace',fontSize:'0.8rem',color:'#718096'}}>{f.transaction_ref||'—'}</td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            )}
+          </div>
+        )}
+
       </div>
     </div>
   );

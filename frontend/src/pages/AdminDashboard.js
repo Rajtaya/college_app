@@ -12,9 +12,13 @@ export default function AdminDashboard({ admin, onLogout }) {
   const [teachers, setTeachers] = useState([]);
   const [attendance, setAttendance] = useState([]);
   const [fees, setFees] = useState([]);
+  const [feeSummary, setFeeSummary] = useState([]);
+  const [bulkFeeForm, setBulkFeeForm] = useState({});
+  const [feeFilter, setFeeFilter] = useState('');
   const [marks, setMarks] = useState([]);
   const [enrollmentSummary, setEnrollmentSummary] = useState([]);
   const [enrollmentDetail, setEnrollmentDetail] = useState([]);
+  const [enrollValidationErrors, setEnrollValidationErrors] = useState([]);
   const [selectedEnrollStudent, setSelectedEnrollStudent] = useState(null);
   const [adminNote, setAdminNote] = useState('');
   const [enrollSearch, setEnrollSearch] = useState('');
@@ -46,7 +50,7 @@ export default function AdminDashboard({ admin, onLogout }) {
     if (activeTab === 'students') fetchStudents();
     if (activeTab === 'teachers') fetchTeachers();
     if (activeTab === 'attendance') fetchAttendance();
-    if (activeTab === 'fees') { fetchFees(); fetchStudents(); }
+    if (activeTab === 'fees') { fetchFees(); fetchStudents(); fetchFeeSummary(); autoMarkOverdue(); }
     if (activeTab === 'marks') fetchAllMarks();
     if (activeTab === 'enrollment') { fetchEnrollmentSummary(); setSelectedEnrollStudent(null); }
   }, [activeTab]);
@@ -68,20 +72,854 @@ export default function AdminDashboard({ admin, onLogout }) {
   const fetchTeachers = async () => { try { const r = await API.get('/admin/teachers'); setTeachers(r.data); } catch(e){} };
   const fetchAttendance = async () => { try { const r = await API.get('/admin/attendance'); setAttendance(r.data); } catch(e){} };
   const fetchFees = async () => { try { const r = await API.get('/admin/fees'); setFees(r.data); } catch(e){} };
+  const fetchFeeSummary = async () => { try { const r = await API.get('/admin/fees/summary'); setFeeSummary(r.data); } catch(e){} };
+  const autoMarkOverdue = async () => { try { await API.put('/admin/fees/mark-overdue'); } catch(e){} };
   const fetchAllMarks = async () => { try { const r = await API.get('/admin/marks'); setMarks(r.data); } catch(e){} };
   const fetchEnrollmentSummary = async () => { try { const r = await API.get('/admin/enrollment/summary'); setEnrollmentSummary(r.data); } catch(e){} };
+
+  // Helper: build enrollment sheet
+  // Format: one column for Code, one for Name, per subject slot
+  // T and P in separate columns
+  const buildEnrollmentSheet = (data) => {
+    const catOrder = ['MAJOR','MIC','MDC','SEC','VAC','AEC','ELECTIVE',
+      'ELECTIVE_FINANCE','ELECTIVE_HR','ELECTIVE_MARKETING','OEC','SEMINAR','INTERNSHIP','VOC'];
+    const catLabels = {
+      MAJOR:'DSC', MIC:'MIC', MDC:'MDC', SEC:'SEC', VAC:'VAC', AEC:'AEC',
+      ELECTIVE:'Elective', ELECTIVE_FINANCE:'DEC-Finance',
+      ELECTIVE_HR:'DEC-HR', ELECTIVE_MARKETING:'DEC-Marketing',
+      OEC:'OEC', SEMINAR:'Seminar', INTERNSHIP:'Internship', VOC:'VOC'
+    };
+
+    // Get unique students sorted by roll_no
+    const students = [...new Map(data.map(d => [d.roll_no, {
+      roll_no: d.roll_no, student_name: d.student_name,
+      semester: d.semester, programme_name: d.programme_name
+    }])).values()].sort((a,b) => a.roll_no.localeCompare(b.roll_no));
+
+    // Get categories present in data
+    const categories = [...new Set(data.map(d => d.category))]
+      .sort((a,b) => {
+        const ai = catOrder.indexOf(a), bi = catOrder.indexOf(b);
+        return (ai===-1?99:ai) - (bi===-1?99:bi);
+      });
+
+    // For each category, find the max number of subject SLOTS any student has
+    // Each subject (T or P) is a separate slot
+    const catMaxSlots = {};
+    categories.forEach(cat => {
+      let max = 0;
+      students.forEach(stu => {
+        const count = data.filter(d => d.roll_no === stu.roll_no && d.category === cat).length;
+        max = Math.max(max, count);
+      });
+      catMaxSlots[cat] = Math.max(max, 1);
+    });
+
+    // Build rows — one per student
+    const rows = students.map(stu => {
+      const row = {
+        'Roll No': stu.roll_no,
+        'Student Name': stu.student_name,
+        'Programme': stu.programme_name,
+        'Semester': stu.semester,
+      };
+
+      categories.forEach(cat => {
+        const label = catLabels[cat] || cat;
+        const stuSubs = data
+          .filter(d => d.roll_no === stu.roll_no && d.category === cat)
+          .sort((a,b) => a.subject_code.localeCompare(b.subject_code));
+        const slots = catMaxSlots[cat];
+
+        if (slots === 1) {
+          // Single subject — Code and Name in separate columns
+          row[`${label} Code`] = stuSubs[0]?.subject_code || '—';
+          row[`${label} Name`] = stuSubs[0]?.subject_name || '—';
+        } else {
+          // Multiple subjects — numbered slots, each with Code and Name column
+          for (let i = 0; i < slots; i++) {
+            const sub = stuSubs[i];
+            row[`${label}-${i+1} Code`] = sub?.subject_code || '—';
+            row[`${label}-${i+1} Name`] = sub?.subject_name || '—';
+          }
+        }
+      });
+
+      return row;
+    });
+
+    return rows;
+  };
+
+  // Export: Programme-wise (one sheet per programme)
+  const handleExportEnrollment = async () => {
+    try {
+      const r = await API.get('/admin/enrollment/export');
+      const data = r.data;
+      if (!data.length) { showMsg('No enrollment data to export', 'error'); return; }
+
+      const wb = XLSX.utils.book_new();
+      const programmes = [...new Set(data.map(d => d.programme_name))].sort();
+
+      programmes.forEach(prog => {
+        const progData = data.filter(d => d.programme_name === prog);
+        const rows = buildEnrollmentSheet(progData);
+        if (!rows.length) return;
+        const ws = XLSX.utils.json_to_sheet(rows);
+        ws['!cols'] = Object.keys(rows[0]).map(k => ({ wch: Math.max(k.length + 2, 22) }));
+        XLSX.utils.book_append_sheet(wb, ws, prog.replace(/[\/\?*\[\]]/g,'').substring(0,31));
+      });
+
+      XLSX.writeFile(wb, `Enrollment_Programme_${new Date().toLocaleDateString('en-IN').replace(/\//g,'-')}.xlsx`);
+      showMsg('✅ Programme-wise export done!');
+    } catch(e) { showMsg('Export failed', 'error'); }
+  };
+
+  // Export: Semester-wise (one sheet per semester)
+  const handleExportSemesterWise = async () => {
+    try {
+      const r = await API.get('/admin/enrollment/export');
+      const data = r.data;
+      if (!data.length) { showMsg('No enrollment data to export', 'error'); return; }
+
+      const wb = XLSX.utils.book_new();
+      const semesters = [...new Set(data.map(d => d.semester))].sort((a,b) => a-b);
+
+      semesters.forEach(sem => {
+        const semData = data.filter(d => d.semester === sem);
+        const rows = buildEnrollmentSheet(semData);
+        if (!rows.length) return;
+        const ws = XLSX.utils.json_to_sheet(rows);
+        ws['!cols'] = Object.keys(rows[0]).map(k => ({ wch: Math.max(k.length + 2, 22) }));
+        XLSX.utils.book_append_sheet(wb, ws, `Semester ${sem}`);
+      });
+
+      XLSX.writeFile(wb, `Enrollment_Semester_${new Date().toLocaleDateString('en-IN').replace(/\//g,'-')}.xlsx`);
+      showMsg('✅ Semester-wise export done!');
+    } catch(e) { showMsg('Export failed', 'error'); }
+  };
+
+  // Export: Odd Semesters (1,3,5,7)
+  const handleExportOddSemesters = async () => {
+    try {
+      const r = await API.get('/admin/enrollment/export');
+      const data = r.data.filter(d => d.semester % 2 !== 0);
+      if (!data.length) { showMsg('No odd semester enrollment data', 'error'); return; }
+
+      const wb = XLSX.utils.book_new();
+      const semesters = [...new Set(data.map(d => d.semester))].sort((a,b) => a-b);
+
+      semesters.forEach(sem => {
+        const semData = data.filter(d => d.semester === sem);
+        const rows = buildEnrollmentSheet(semData);
+        if (!rows.length) return;
+        const ws = XLSX.utils.json_to_sheet(rows);
+        ws['!cols'] = Object.keys(rows[0]).map(k => ({ wch: Math.max(k.length + 2, 22) }));
+        XLSX.utils.book_append_sheet(wb, ws, `Sem ${sem} (Odd)`);
+      });
+
+      XLSX.writeFile(wb, `Enrollment_OddSem_${new Date().toLocaleDateString('en-IN').replace(/\//g,'-')}.xlsx`);
+      showMsg('✅ Odd semester export done!');
+    } catch(e) { showMsg('Export failed', 'error'); }
+  };
+
+  // Export: Even Semesters (2,4,6,8)
+  const handleExportEvenSemesters = async () => {
+    try {
+      const r = await API.get('/admin/enrollment/export');
+      const data = r.data.filter(d => d.semester % 2 === 0);
+      if (!data.length) { showMsg('No even semester enrollment data', 'error'); return; }
+
+      const wb = XLSX.utils.book_new();
+      const semesters = [...new Set(data.map(d => d.semester))].sort((a,b) => a-b);
+
+      semesters.forEach(sem => {
+        const semData = data.filter(d => d.semester === sem);
+        const rows = buildEnrollmentSheet(semData);
+        if (!rows.length) return;
+        const ws = XLSX.utils.json_to_sheet(rows);
+        ws['!cols'] = Object.keys(rows[0]).map(k => ({ wch: Math.max(k.length + 2, 22) }));
+        XLSX.utils.book_append_sheet(wb, ws, `Sem ${sem} (Even)`);
+      });
+
+      XLSX.writeFile(wb, `Enrollment_EvenSem_${new Date().toLocaleDateString('en-IN').replace(/\//g,'-')}.xlsx`);
+      showMsg('✅ Even semester export done!');
+    } catch(e) { showMsg('Export failed', 'error'); }
+  };
+
+  // ── Enrollment Export Functions ──────────────────────────────────────────
+  const exportEnrollmentSummary = () => {
+    const rows = enrollmentSummary.map(s => ({
+      'Roll No': s.roll_no,
+      'Student Name': s.student_name,
+      'Programme': s.programme_name || '—',
+      'Level': s.level_name || '—',
+      'Semester': s.semester,
+      'Status': s.accepted > 0 ? 'Submitted' : s.total_enrolled > 0 ? 'Draft' : 'Not Enrolled',
+      'Total Enrolled': s.total_enrolled || 0,
+      'Accepted': s.accepted || 0,
+      'Rejected': s.rejected || 0,
+      'Pending': s.pending || 0,
+      'Admin Modified': s.admin_modified ? 'Yes' : 'No',
+    }));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Enrollment Summary');
+    XLSX.writeFile(wb, 'enrollment_summary.xlsx');
+  };
+
+  const exportEnrollmentDetail = async () => {
+    try {
+      const r = await API.get('/admin/enrollment/export');
+      const rows = r.data.map(e => ({
+        'Roll No': e.roll_no,
+        'Student Name': e.student_name,
+        'Programme': e.programme_name || '—',
+        'Level': e.level_name || '—',
+        'Semester': e.semester,
+        'Subject Code': e.subject_code,
+        'Subject Name': e.subject_name,
+        'Category': e.category,
+        'Credits': e.credits,
+        'Status': e.status || 'NOT ENROLLED',
+        'Is Major': e.is_major ? 'Yes' : 'No',
+        'Admin Modified': e.admin_modified ? 'Yes' : 'No',
+        'Remarks': e.remarks || '',
+      }));
+      const ws = XLSX.utils.json_to_sheet(rows);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Enrollment Detail');
+      XLSX.writeFile(wb, 'enrollment_detail.xlsx');
+    } catch(e) { showMsg('Failed to export', 'error'); }
+  };
+
+  // ── Marks Export Functions ─────────────────────────────────────────────────
+
+  // Helper: build ONE marks sheet for a specific exam type
+  // No Total, No %, No External
+  const buildMarksSheetByType = (data, examType) => {
+    const typeData = data.filter(d => d.exam_type === examType);
+    if (!typeData.length) return [];
+
+    // Unique students
+    const students = [...new Map(data.map(d => [d.roll_no, {
+      roll_no: d.roll_no, student_name: d.student_name,
+      semester: d.semester, programme_name: d.programme_name
+    }])).values()].sort((a,b) => a.roll_no.localeCompare(b.roll_no));
+
+    // Unique subjects that have this exam type
+    const subjects = [...new Map(typeData.map(d => [d.subject_code, {
+      subject_code: d.subject_code, subject_name: d.subject_name,
+      category: d.category, max_marks: d.max_marks
+    }])).values()].sort((a,b) => a.subject_code.localeCompare(b.subject_code));
+
+    return students.map(stu => {
+      const row = {
+        'Roll No': stu.roll_no,
+        'Student Name': stu.student_name,
+        'Programme': stu.programme_name,
+        'Semester': stu.semester,
+      };
+      subjects.forEach(sub => {
+        const mark = typeData.find(d => d.roll_no === stu.roll_no && d.subject_code === sub.subject_code);
+        row[`${sub.subject_code} (/${sub.max_marks})`] = mark ? mark.marks_obtained : '—';
+      });
+      return row;
+    });
+  };
+
+  // Generic marks export with 3 sheets: Internal, Practical Internal, Assignment
+  const exportMarksToWorkbook = (data, filename) => {
+    const wb = XLSX.utils.book_new();
+    const examTypes = [
+      { key: 'INTERNAL',           label: 'Internal Theory' },
+      { key: 'PRACTICAL_INTERNAL', label: 'Practical Internal' },
+      { key: 'ASSIGNMENT',         label: 'Assignment' },
+    ];
+    let hasSheet = false;
+    examTypes.forEach(({ key, label }) => {
+      const rows = buildMarksSheetByType(data, key);
+      if (!rows.length) return;
+      const ws = XLSX.utils.json_to_sheet(rows);
+      ws['!cols'] = Object.keys(rows[0]).map(k => ({ wch: Math.max(k.length + 2, 16) }));
+      XLSX.utils.book_append_sheet(wb, ws, label.substring(0, 31));
+      hasSheet = true;
+    });
+    if (!hasSheet) return false;
+    XLSX.writeFile(wb, filename);
+    return true;
+  };
+
+  // Export marks programme-wise (one file per programme, 3 sheets inside)
+  const exportMarksProgrammeWise = async () => {
+    try {
+      const r = await API.get('/admin/marks/export');
+      const data = r.data;
+      if (!data.length) { showMsg('No marks data to export', 'error'); return; }
+      const programmes = [...new Set(data.map(d => d.programme_name))].sort();
+      programmes.forEach(prog => {
+        const progData = data.filter(d => d.programme_name === prog);
+        exportMarksToWorkbook(progData, `Marks_${prog.replace(/[^a-zA-Z0-9]/g,'_')}_${new Date().toLocaleDateString('en-IN').replace(/\//g,'-')}.xlsx`);
+      });
+      showMsg(`✅ Marks exported for ${programmes.length} programme(s)!`);
+    } catch(e) { showMsg('Marks export failed', 'error'); }
+  };
+
+  // Export marks semester-wise (one file, each semester has 3 sheets)
+  const exportMarksSemesterWise = async () => {
+    try {
+      const r = await API.get('/admin/marks/export');
+      const data = r.data;
+      if (!data.length) { showMsg('No marks data to export', 'error'); return; }
+      const wb = XLSX.utils.book_new();
+      const examTypes = [
+        { key: 'INTERNAL',           label: 'Internal Theory' },
+        { key: 'PRACTICAL_INTERNAL', label: 'Practical Internal' },
+        { key: 'ASSIGNMENT',         label: 'Assignment' },
+        { key: 'EXTERNAL',           label: 'External' },
+      ];
+      const semesters = [...new Set(data.map(d => d.semester))].sort((a,b) => a-b);
+      semesters.forEach(sem => {
+        const semData = data.filter(d => d.semester === sem);
+        examTypes.forEach(({ key, label }) => {
+          const rows = buildMarksSheetByType(semData, key);
+          if (!rows.length) return;
+          const ws = XLSX.utils.json_to_sheet(rows);
+          ws['!cols'] = Object.keys(rows[0]).map(k => ({ wch: Math.max(k.length + 2, 16) }));
+          XLSX.utils.book_append_sheet(wb, ws, `Sem${sem}-${label.substring(0,18)}`);
+        });
+      });
+      XLSX.writeFile(wb, `Marks_SemesterWise_${new Date().toLocaleDateString('en-IN').replace(/\//g,'-')}.xlsx`);
+      showMsg('✅ Semester-wise marks exported!');
+    } catch(e) { showMsg('Marks export failed', 'error'); }
+  };
+
+  // Export marks odd semesters
+  const exportMarksOddSem = async () => {
+    try {
+      const r = await API.get('/admin/marks/export');
+      const data = r.data.filter(d => d.semester % 2 !== 0);
+      if (!data.length) { showMsg('No odd semester marks data', 'error'); return; }
+      const wb = XLSX.utils.book_new();
+      const examTypes = [
+        { key: 'INTERNAL', label: 'Internal Theory' },
+        { key: 'PRACTICAL_INTERNAL', label: 'Practical Internal' },
+        { key: 'ASSIGNMENT', label: 'Assignment' },
+      ];
+      const semesters = [...new Set(data.map(d => d.semester))].sort((a,b) => a-b);
+      semesters.forEach(sem => {
+        const semData = data.filter(d => d.semester === sem);
+        examTypes.forEach(({ key, label }) => {
+          const rows = buildMarksSheetByType(semData, key);
+          if (!rows.length) return;
+          const ws = XLSX.utils.json_to_sheet(rows);
+          ws['!cols'] = Object.keys(rows[0]).map(k => ({ wch: Math.max(k.length + 2, 16) }));
+          XLSX.utils.book_append_sheet(wb, ws, `Sem${sem}-${label.substring(0,18)}`);
+        });
+      });
+      XLSX.writeFile(wb, `Marks_OddSem_${new Date().toLocaleDateString('en-IN').replace(/\//g,'-')}.xlsx`);
+      showMsg('✅ Odd semester marks exported!');
+    } catch(e) { showMsg('Marks export failed', 'error'); }
+  };
+
+  // Export marks even semesters
+  const exportMarksEvenSem = async () => {
+    try {
+      const r = await API.get('/admin/marks/export');
+      const data = r.data.filter(d => d.semester % 2 === 0);
+      if (!data.length) { showMsg('No even semester marks data', 'error'); return; }
+      const wb = XLSX.utils.book_new();
+      const examTypes = [
+        { key: 'INTERNAL', label: 'Internal Theory' },
+        { key: 'PRACTICAL_INTERNAL', label: 'Practical Internal' },
+        { key: 'ASSIGNMENT', label: 'Assignment' },
+      ];
+      const semesters = [...new Set(data.map(d => d.semester))].sort((a,b) => a-b);
+      semesters.forEach(sem => {
+        const semData = data.filter(d => d.semester === sem);
+        examTypes.forEach(({ key, label }) => {
+          const rows = buildMarksSheetByType(semData, key);
+          if (!rows.length) return;
+          const ws = XLSX.utils.json_to_sheet(rows);
+          ws['!cols'] = Object.keys(rows[0]).map(k => ({ wch: Math.max(k.length + 2, 16) }));
+          XLSX.utils.book_append_sheet(wb, ws, `Sem${sem}-${label.substring(0,18)}`);
+        });
+      });
+      XLSX.writeFile(wb, `Marks_EvenSem_${new Date().toLocaleDateString('en-IN').replace(/\//g,'-')}.xlsx`);
+      showMsg('✅ Even semester marks exported!');
+    } catch(e) { showMsg('Marks export failed', 'error'); }
+  };
+
+  // Per-subject export: Excel + PDF for all students of one programme
+  // Shows: Roll No, Name, Internal, Assignment, Practical Internal marks
+  const exportSubjectMarks = async () => {
+    try {
+      const r = await API.get('/admin/marks/export');
+      const allData = r.data;
+      if (!allData.length) { showMsg('No marks data to export', 'error'); return; }
+
+      // Get all unique subjects
+      const subjects = [...new Map(allData.map(d => [d.subject_code, {
+        subject_code: d.subject_code,
+        subject_name: d.subject_name,
+        programme_name: d.programme_name,
+        semester: d.semester,
+        category: d.category,
+      }])).values()].sort((a,b) => a.subject_code.localeCompare(b.subject_code));
+
+      const examTypes = [
+        { key: 'INTERNAL',           label: 'Internal' },
+        { key: 'ASSIGNMENT',         label: 'Assignment' },
+        { key: 'PRACTICAL_INTERNAL', label: 'Practical Internal' },
+      ];
+
+      // One Excel file with one sheet per subject
+      const wb = XLSX.utils.book_new();
+
+      subjects.forEach(sub => {
+        const subData = allData.filter(d => d.subject_code === sub.subject_code);
+        const students = [...new Map(subData.map(d => [d.roll_no, {
+          roll_no: d.roll_no, student_name: d.student_name,
+          programme_name: d.programme_name, semester: d.semester
+        }])).values()].sort((a,b) => a.roll_no.localeCompare(b.roll_no));
+
+        const rows = students.map((stu, idx) => {
+          const row = {
+            'S.No': idx + 1,
+            'Roll No': stu.roll_no,
+            'Student Name': stu.student_name,
+            'Programme': stu.programme_name,
+            'Semester': stu.semester,
+          };
+          examTypes.forEach(({ key, label }) => {
+            const mark = subData.find(d => d.roll_no === stu.roll_no && d.exam_type === key);
+            if (mark) row[`${label} (/${mark.max_marks})`] = mark.marks_obtained;
+          });
+          return row;
+        });
+
+        if (!rows.length) return;
+        const ws = XLSX.utils.json_to_sheet(rows);
+        ws['!cols'] = Object.keys(rows[0]).map(k => ({ wch: Math.max(k.length + 2, 16) }));
+        // Sheet name = subject code (max 31 chars)
+        const sheetName = sub.subject_code.replace(/[\/\?*\[\]]/g,'').substring(0, 31);
+        XLSX.utils.book_append_sheet(wb, ws, sheetName);
+      });
+
+      XLSX.writeFile(wb, `Marks_SubjectWise_${new Date().toLocaleDateString('en-IN').replace(/\//g,'-')}.xlsx`);
+
+      // PDF: one PDF per subject using printable HTML
+      subjects.forEach(sub => {
+        const subData = allData.filter(d => d.subject_code === sub.subject_code);
+        const students = [...new Map(subData.map(d => [d.roll_no, {
+          roll_no: d.roll_no, student_name: d.student_name,
+          programme_name: d.programme_name, semester: d.semester
+        }])).values()].sort((a,b) => a.roll_no.localeCompare(b.roll_no));
+
+        if (!students.length) return;
+
+        const prog = students[0].programme_name;
+        const sem  = students[0].semester;
+
+        // Build HTML table
+        const typeHeaders = examTypes.map(({ key, label }) => {
+          const sample = subData.find(d => d.exam_type === key);
+          return sample ? `<th>${label} (/${sample.max_marks})</th>` : '';
+        }).join('');
+
+        const bodyRows = students.map((stu, idx) => {
+          const cells = examTypes.map(({ key }) => {
+            const mark = subData.find(d => d.roll_no === stu.roll_no && d.exam_type === key);
+            return `<td>${mark ? mark.marks_obtained : '—'}</td>`;
+          }).join('');
+          return `<tr><td>${idx+1}</td><td>${stu.roll_no}</td><td>${stu.student_name}</td>${cells}</tr>`;
+        }).join('');
+
+        const html = `
+          <html><head><title>${sub.subject_code}</title>
+          <style>
+            body { font-family: Arial, sans-serif; font-size: 12px; margin: 20px; }
+            h2 { margin: 0 0 4px; } h4 { margin: 0 0 12px; color: #555; }
+            table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+            th { background: #2d3748; color: #fff; padding: 8px 10px; text-align: left; font-size: 11px; }
+            td { padding: 7px 10px; border-bottom: 1px solid #e2e8f0; font-size: 11px; }
+            tr:nth-child(even) { background: #f7fafc; }
+            .header { display: flex; justify-content: space-between; border-bottom: 2px solid #2d3748; padding-bottom: 8px; margin-bottom: 4px; }
+          </style></head>
+          <body>
+            <div class="header">
+              <div>
+                <h2>${sub.subject_code} — ${sub.subject_name}</h2>
+                <h4>${prog} | Semester ${sem} | ${sub.category}</h4>
+              </div>
+              <div style="text-align:right;font-size:11px;color:#555;">
+                Generated: ${new Date().toLocaleDateString('en-IN')}<br/>
+                Total Students: ${students.length}
+              </div>
+            </div>
+            <table>
+              <thead><tr><th>S.No</th><th>Roll No</th><th>Student Name</th>${typeHeaders}</tr></thead>
+              <tbody>${bodyRows}</tbody>
+            </table>
+          </body></html>`;
+
+        const w = window.open('', '_blank');
+        if (w) {
+          w.document.write(html);
+          w.document.close();
+          w.focus();
+          setTimeout(() => { w.print(); }, 500);
+        }
+      });
+
+      showMsg('✅ Subject-wise Excel downloaded! PDF print dialogs opening...');
+    } catch(e) { showMsg('Export failed: ' + e.message, 'error'); }
+  };
+
+  // ── Attendance Export Functions ────────────────────────────────────────────
+
+  // Helper: build attendance sheet for a group of data
+  // One row per student, each subject as columns: Present, Absent, Late, Total, %
+  const buildAttendanceSheet = (data) => {
+    const students = [...new Map(data.map(d => [d.roll_no, {
+      roll_no: d.roll_no, student_name: d.student_name,
+      programme_name: d.programme_name, semester: d.semester
+    }])).values()].sort((a,b) => a.roll_no.localeCompare(b.roll_no));
+
+    const subjects = [...new Map(data.map(d => [d.subject_code, {
+      subject_code: d.subject_code, subject_name: d.subject_name
+    }])).values()].sort((a,b) => a.subject_code.localeCompare(b.subject_code));
+
+    return students.map((stu, idx) => {
+      const row = {
+        'S.No': idx + 1,
+        'Roll No': stu.roll_no,
+        'Student Name': stu.student_name,
+        'Programme': stu.programme_name,
+        'Semester': stu.semester,
+      };
+      subjects.forEach(sub => {
+        const subData = data.filter(d => d.roll_no === stu.roll_no && d.subject_code === sub.subject_code);
+        const total   = subData.total_classes || 0;
+        const present = subData.present || 0;
+        const absent  = subData.absent  || 0;
+        const late    = subData.late    || 0;
+        const pct     = subData.attendance_pct || 0;
+        row[`${sub.subject_code} Present`] = present;
+        row[`${sub.subject_code} Absent`]  = absent;
+        row[`${sub.subject_code} Late`]    = late;
+        row[`${sub.subject_code} Total`]   = total;
+        row[`${sub.subject_code} %`]       = pct ? `${pct}%` : '—';
+      });
+      return row;
+    });
+  };
+
+  // Helper: build attendance sheet from summary API data
+  const buildAttendanceSummarySheet = (data) => {
+    const students = [...new Map(data.map(d => [d.roll_no, {
+      roll_no: d.roll_no, student_name: d.student_name,
+      programme_name: d.programme_name, semester: d.semester
+    }])).values()].sort((a,b) => a.roll_no.localeCompare(b.roll_no));
+
+    const subjects = [...new Map(data.map(d => [d.subject_code, {
+      subject_code: d.subject_code, subject_name: d.subject_name
+    }])).values()].sort((a,b) => a.subject_code.localeCompare(b.subject_code));
+
+    return students.map((stu, idx) => {
+      const row = {
+        'S.No': idx + 1,
+        'Roll No': stu.roll_no,
+        'Student Name': stu.student_name,
+        'Programme': stu.programme_name,
+        'Semester': stu.semester,
+      };
+      subjects.forEach(sub => {
+        const rec = data.find(d => d.roll_no === stu.roll_no && d.subject_code === sub.subject_code);
+        row[`${sub.subject_code} P`]     = rec ? rec.present  : '—';
+        row[`${sub.subject_code} A`]     = rec ? rec.absent   : '—';
+        row[`${sub.subject_code} L`]     = rec ? rec.late     : '—';
+        row[`${sub.subject_code} Total`] = rec ? rec.total_classes : '—';
+        row[`${sub.subject_code} %`]     = rec ? `${rec.attendance_pct}%` : '—';
+      });
+      return row;
+    });
+  };
+
+  // Export attendance programme-wise Excel
+  const exportAttendanceProgrammeWise = async () => {
+    try {
+      const r = await API.get('/admin/attendance/summary');
+      const data = r.data;
+      if (!data.length) { showMsg('No attendance data to export', 'error'); return; }
+
+      const wb = XLSX.utils.book_new();
+      const programmes = [...new Set(data.map(d => d.programme_name))].sort();
+
+      programmes.forEach(prog => {
+        const progData = data.filter(d => d.programme_name === prog);
+        const rows = buildAttendanceSummarySheet(progData);
+        if (!rows.length) return;
+        const ws = XLSX.utils.json_to_sheet(rows);
+        ws['!cols'] = Object.keys(rows[0]).map(k => ({ wch: Math.max(k.length + 2, 14) }));
+        XLSX.utils.book_append_sheet(wb, ws, prog.replace(/[\/\?*\[\]]/g,'').substring(0,31));
+      });
+
+      XLSX.writeFile(wb, `Attendance_Programme_${new Date().toLocaleDateString('en-IN').replace(/\//g,'-')}.xlsx`);
+      showMsg('✅ Programme-wise attendance exported!');
+    } catch(e) { showMsg('Attendance export failed', 'error'); }
+  };
+
+  // Export attendance subject-wise Excel + PDF
+  const exportAttendanceSubjectWise = async () => {
+    try {
+      const r = await API.get('/admin/attendance/summary');
+      const data = r.data;
+      if (!data.length) { showMsg('No attendance data to export', 'error'); return; }
+
+      const subjects = [...new Map(data.map(d => [d.subject_code, {
+        subject_code: d.subject_code, subject_name: d.subject_name,
+        category: d.category
+      }])).values()].sort((a,b) => a.subject_code.localeCompare(b.subject_code));
+
+      // One Excel with one sheet per subject
+      const wb = XLSX.utils.book_new();
+
+      subjects.forEach(sub => {
+        const subData = data.filter(d => d.subject_code === sub.subject_code);
+        const students = [...new Map(subData.map(d => [d.roll_no, d])).values()]
+          .sort((a,b) => a.roll_no.localeCompare(b.roll_no));
+
+        const rows = students.map((stu, idx) => ({
+          'S.No':         idx + 1,
+          'Roll No':      stu.roll_no,
+          'Student Name': stu.student_name,
+          'Programme':    stu.programme_name,
+          'Semester':     stu.semester,
+          'Total Classes':stu.total_classes,
+          'Present':      stu.present,
+          'Absent':       stu.absent,
+          'Late':         stu.late,
+          'Attendance %': `${stu.attendance_pct}%`,
+        }));
+
+        if (!rows.length) return;
+        const ws = XLSX.utils.json_to_sheet(rows);
+        ws['!cols'] = Object.keys(rows[0]).map(k => ({ wch: Math.max(k.length + 2, 14) }));
+        XLSX.utils.book_append_sheet(wb, ws, sub.subject_code.replace(/[\/\?*\[\]]/g,'').substring(0,31));
+      });
+
+      XLSX.writeFile(wb, `Attendance_SubjectWise_${new Date().toLocaleDateString('en-IN').replace(/\//g,'-')}.xlsx`);
+
+      // PDF — one per subject
+      subjects.forEach(sub => {
+        const subData = data.filter(d => d.subject_code === sub.subject_code);
+        const students = [...new Map(subData.map(d => [d.roll_no, d])).values()]
+          .sort((a,b) => a.roll_no.localeCompare(b.roll_no));
+        if (!students.length) return;
+
+        const prog = students[0].programme_name;
+        const sem  = students[0].semester;
+
+        const bodyRows = students.map((stu, idx) => {
+          const pct = Number(stu.attendance_pct);
+          const color = pct >= 75 ? '#276749' : pct >= 60 ? '#92400e' : '#c53030';
+          return `<tr>
+            <td>${idx+1}</td>
+            <td>${stu.roll_no}</td>
+            <td>${stu.student_name}</td>
+            <td>${stu.total_classes}</td>
+            <td>${stu.present}</td>
+            <td>${stu.absent}</td>
+            <td>${stu.late}</td>
+            <td style="color:${color};font-weight:700">${stu.attendance_pct}%</td>
+          </tr>`;
+        }).join('');
+
+        const html = `
+          <html><head><title>${sub.subject_code}</title>
+          <style>
+            body { font-family: Arial, sans-serif; font-size: 12px; margin: 20px; }
+            h2 { margin: 0 0 4px; } h4 { margin: 0 0 12px; color: #555; }
+            table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+            th { background: #2d3748; color: #fff; padding: 8px 10px; text-align: left; font-size: 11px; }
+            td { padding: 7px 10px; border-bottom: 1px solid #e2e8f0; font-size: 11px; }
+            tr:nth-child(even) { background: #f7fafc; }
+            .header { display: flex; justify-content: space-between; border-bottom: 2px solid #2d3748; padding-bottom: 8px; margin-bottom: 4px; }
+          </style></head>
+          <body>
+            <div class="header">
+              <div>
+                <h2>${sub.subject_code} — ${sub.subject_name}</h2>
+                <h4>${prog} | Semester ${sem} | ${sub.category}</h4>
+              </div>
+              <div style="text-align:right;font-size:11px;color:#555;">
+                Generated: ${new Date().toLocaleDateString('en-IN')}<br/>
+                Total Students: ${students.length}
+              </div>
+            </div>
+            <table>
+              <thead><tr>
+                <th>S.No</th><th>Roll No</th><th>Student Name</th>
+                <th>Total</th><th>Present</th><th>Absent</th><th>Late</th><th>%</th>
+              </tr></thead>
+              <tbody>${bodyRows}</tbody>
+            </table>
+          </body></html>`;
+
+        const w = window.open('', '_blank');
+        if (w) {
+          w.document.write(html);
+          w.document.close();
+          w.focus();
+          setTimeout(() => { w.print(); }, 500);
+        }
+      });
+
+      showMsg('✅ Subject-wise attendance Excel downloaded! PDF print dialogs opening...');
+    } catch(e) { showMsg('Attendance export failed: ' + e.message, 'error'); }
+  };
+
+  const exportSubjectWise = async () => {
+    try {
+      const r = await API.get('/admin/enrollment/export-subject-wise');
+      const rows = r.data.map(e => ({
+        'Subject Code': e.subject_code,
+        'Subject Name': e.subject_name,
+        'Category': e.category,
+        'Programme': e.programme_name || 'Common',
+        'Semester': e.semester,
+        'Credits': e.credits,
+        'Roll No': e.roll_no,
+        'Student Name': e.student_name,
+        'Status': e.status,
+      }));
+      const ws = XLSX.utils.json_to_sheet(rows);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Subject-wise');
+      XLSX.writeFile(wb, 'enrollment_subject_wise.xlsx');
+    } catch(e) { showMsg('Failed to export', 'error'); }
+  };
 
   const openEnrollmentDetail = async (student) => {
     setSelectedEnrollStudent(student);
     setAdminNote('');
+    setEnrollValidationErrors([]);
     try { const r = await API.get(`/admin/enrollment/detail/${student.student_id}`); setEnrollmentDetail(r.data); } catch(e){}
   };
 
   const handleEnrollStatusChange = (subject_id, newStatus) => {
-    setEnrollmentDetail(prev => prev.map(s => s.subject_id === subject_id ? { ...s, status: newStatus } : s));
+    setEnrollmentDetail(prev => {
+      let updated = prev.map(s => s.subject_id === subject_id ? { ...s, status: newStatus } : s);
+      // Auto-sync T/P pair
+      const sub = prev.find(s => s.subject_id === subject_id);
+      if (sub && sub.pair_code) {
+        updated = updated.map(s => s.subject_code.trim() === sub.pair_code.trim() ? { ...s, status: newStatus } : s);
+      }
+      // Run validation on the updated detail directly
+      runValidationOn(updated);
+      return updated;
+    });
+  };
+
+  const getBaseCode = (code) => {
+    const c = code.trim();
+    const last = c.slice(-1).toUpperCase();
+    return ['T','P'].includes(last) ? c.slice(0,-1) : c;
+  };
+
+  const runValidationOn = (detail) => {
+    const errors = validateAdminEnrollment(detail);
+    return errors;
+  };
+
+  const validateAdminEnrollment = (detail) => {
+    const enrollDetail = detail || enrollmentDetail;
+    const isPG = selectedEnrollStudent?.level_name === 'PG'
+      || Number(selectedEnrollStudent?.level_id) === 2
+      || String(selectedEnrollStudent?.course||'').toUpperCase().startsWith('M.');
+
+    const accepted = enrollDetail.filter(s => s.status === 'ACCEPTED');
+    const byCategory = {};
+    accepted.forEach(s => {
+      if (!byCategory[s.category]) byCategory[s.category] = [];
+      byCategory[s.category].push(s);
+    });
+
+    const errors = [];
+    const majorDisciplines = (byCategory['MAJOR']||[]).map(s => s.discipline_id).filter(Boolean);
+
+    if (isPG) {
+      // PG Validations
+      const vac = byCategory['VAC'] || [];
+      if (enrollDetail.some(s=>s.category==='VAC') && vac.length > 1)
+        errors.push(`❌ VAC: Select only 1 (selected ${vac.length})`);
+
+      const elective = byCategory['ELECTIVE'] || [];
+      if (enrollDetail.some(s=>s.category==='ELECTIVE') && elective.length > 1)
+        errors.push(`❌ Elective: Select only 1 (selected ${elective.length})`);
+
+      const fin = (byCategory['ELECTIVE_FINANCE']||[]).length;
+      const hr  = (byCategory['ELECTIVE_HR']||[]).length;
+      const mkt = (byCategory['ELECTIVE_MARKETING']||[]).length;
+      const decTotal = fin + hr + mkt;
+      if (enrollDetail.some(s=>['ELECTIVE_FINANCE','ELECTIVE_HR','ELECTIVE_MARKETING'].includes(s.category)) && decTotal > 0) {
+        if (decTotal !== 4) errors.push(`❌ DEC: Must select exactly 4 (selected ${decTotal})`);
+        else {
+          const groups = [fin,hr,mkt].filter(n=>n>0);
+          const isCore = groups.length===1 && groups[0]===4;
+          const isMixed = groups.length===2 && groups.every(n=>n===2);
+          if (!isCore && !isMixed) errors.push(`❌ DEC: Invalid combination. Finance=${fin}, HR=${hr}, Marketing=${mkt}`);
+        }
+      }
+    } else {
+      // UG Validations
+      const mic = byCategory['MIC'] || [];
+      if (mic.length > 1) errors.push(`❌ MIC: Select only 1 (selected ${mic.length})`);
+      else if (mic.length===1 && majorDisciplines.includes(mic[0].discipline_id))
+        errors.push(`❌ MIC: "${mic[0].subject_name}" conflicts with MAJOR discipline`);
+
+      const vac = byCategory['VAC'] || [];
+      if (vac.length > 1) errors.push(`❌ VAC: Select only 1 (selected ${vac.length})`);
+
+      const aec = byCategory['AEC'] || [];
+      if (aec.length > 1) errors.push(`❌ AEC: Select only 1 (selected ${aec.length})`);
+
+      const mdc = byCategory['MDC'] || [];
+      if (mdc.length > 0) {
+        mdc.forEach(s => { if (majorDisciplines.includes(s.discipline_id)) errors.push(`❌ MDC: "${s.subject_name}" conflicts with MAJOR`); });
+        const mdcGroups = {};
+        mdc.forEach(s => { const b=getBaseCode(s.subject_code); if(!mdcGroups[b]) mdcGroups[b]=[]; mdcGroups[b].push(s); });
+        if (Object.keys(mdcGroups).length > 1) errors.push('❌ MDC: Select from only ONE group');
+      }
+
+      const sec = byCategory['SEC'] || [];
+      if (sec.length > 0) {
+        const secGroups = {};
+        sec.forEach(s => { const b=getBaseCode(s.subject_code); if(!secGroups[b]) secGroups[b]=[]; secGroups[b].push(s); });
+        if (Object.keys(secGroups).length > 1) errors.push('❌ SEC: Select from only ONE group');
+      }
+
+      // T/P pair sync check
+      enrollDetail.forEach(s => {
+        if (s.pair_type === 'THEORY' && s.pair_code) {
+          const practical = enrollDetail.find(s2 => s2.subject_code.trim() === s.pair_code.trim());
+          if (practical && s.status !== practical.status)
+            errors.push(`❌ ${s.subject_code}: Theory and Practical must have same status`);
+        }
+      });
+    }
+
+    return errors;
   };
 
   const handleEnrollSave = async () => {
+    const errors = validateAdminEnrollment(enrollmentDetail);
+    if (errors.length > 0) {
+      setEnrollValidationErrors(errors);
+      showMsg(`⚠️ Fix ${errors.length} validation error(s) before saving`, 'error');
+      return;
+    }
     const changes = enrollmentDetail
       .filter(s => s.status)
       .map(s => ({ subject_id: s.subject_id, status: s.status }));
@@ -89,6 +927,7 @@ export default function AdminDashboard({ admin, onLogout }) {
     try {
       await API.put(`/admin/enrollment/bulkupdate/${selectedEnrollStudent.student_id}`, { changes, admin_note: adminNote });
       showMsg(`✅ ${changes.length} subject(s) updated!`);
+      setEnrollValidationErrors([]);
       fetchEnrollmentSummary();
       openEnrollmentDetail(selectedEnrollStudent);
     } catch(e) { showMsg(e.response?.data?.error || 'Error', 'error'); }
@@ -211,6 +1050,16 @@ export default function AdminDashboard({ admin, onLogout }) {
         showMsg('Subject assigned!');
       }
     } catch(e) { showMsg(e.response?.data?.error || 'Failed to update', 'error'); }
+  };
+
+  const handleBulkFee = async (e) => {
+    e.preventDefault();
+    try {
+      const r = await API.post('/admin/fees/bulk', bulkFeeForm);
+      showMsg(`✅ ${r.data.message}`);
+      setBulkFeeForm({});
+      fetchFees(); fetchFeeSummary();
+    } catch(err) { showMsg(err.response?.data?.error || 'Error', 'error'); }
   };
 
   const handleAddFee = async (e) => {
@@ -689,8 +1538,17 @@ export default function AdminDashboard({ admin, onLogout }) {
                     <h3 style={{margin:0}}>📋 Enrollment Management
                       <span style={{fontSize:'0.85rem',color:'#718096',fontWeight:'400',marginLeft:'0.75rem'}}>({enrollmentSummary.length} students)</span>
                     </h3>
-                    <input style={{...styles.input,minWidth:'240px',margin:0}} placeholder="🔍 Search by name or roll no…"
-                      value={enrollSearch} onChange={e=>setEnrollSearch(e.target.value)} />
+                    <div style={{display:'flex',gap:'0.5rem',flexWrap:'wrap',alignItems:'center'}}>
+                      <input style={{...styles.input,minWidth:'200px',margin:0}} placeholder="🔍 Search by name or roll no…"
+                        value={enrollSearch} onChange={e=>setEnrollSearch(e.target.value)} />
+                      <button style={{...styles.templateBtn,whiteSpace:'nowrap'}} onClick={exportEnrollmentSummary}>📊 Summary</button>
+                      <button style={{...styles.templateBtn,whiteSpace:'nowrap',background:'#276749',color:'#fff'}} onClick={handleExportEnrollment}>📥 Programme-wise</button>
+                      <button style={{...styles.templateBtn,whiteSpace:'nowrap'}} onClick={handleExportSemesterWise}>📅 Semester-wise</button>
+                      <button style={{...styles.templateBtn,whiteSpace:'nowrap'}} onClick={handleExportOddSemesters}>📋 Odd Sem (1,3,5,7)</button>
+                      <button style={{...styles.templateBtn,whiteSpace:'nowrap'}} onClick={handleExportEvenSemesters}>📋 Even Sem (2,4,6,8)</button>
+                      <button style={{...styles.templateBtn,whiteSpace:'nowrap'}} onClick={exportEnrollmentDetail}>📄 Full Detail</button>
+                      <button style={{...styles.templateBtn,whiteSpace:'nowrap'}} onClick={exportSubjectWise}>📚 Subject-wise</button>
+                    </div>
                   </div>
                   {/* Stats bar */}
                   <div style={{display:'flex',gap:'1rem',flexWrap:'wrap'}}>
@@ -781,6 +1639,16 @@ export default function AdminDashboard({ admin, onLogout }) {
                       </div>
                     ))}
                   </div>
+                  {/* Validation Errors */}
+                  {enrollValidationErrors.length > 0 && (
+                    <div style={{background:'#fff5f5',border:'2px solid #fc8181',borderRadius:'10px',padding:'1rem',marginBottom:'1rem'}}>
+                      <h4 style={{margin:'0 0 0.5rem',color:'#c53030'}}>⚠️ Please fix these issues before saving:</h4>
+                      {enrollValidationErrors.map((err,i)=>(
+                        <p key={i} style={{margin:'0.2rem 0',color:'#c53030',fontSize:'0.85rem'}}>{err}</p>
+                      ))}
+                    </div>
+                  )}
+
                   {/* Admin note + actions */}
                   <div style={{display:'flex',gap:'0.75rem',flexWrap:'wrap',alignItems:'center'}}>
                     <input style={{...styles.input,flex:1,minWidth:'200px',margin:0}} placeholder="Admin note (optional — shown to student)"
@@ -830,26 +1698,55 @@ export default function AdminDashboard({ admin, onLogout }) {
                           <thead>
                             <tr>{['Code','Subject','Discipline','Credits','Current Status','Change Status'].map(h=><th key={h} style={styles.th}>{h}</th>)}</tr>
                           </thead>
-                          <tbody>{subjects.map(s=>(
-                            <tr key={s.subject_id} style={{background:s.status==='ACCEPTED'?'#f0fff4':s.status==='REJECTED'?'#fff5f5':!s.status?'#f7fafc':'#fff'}}>
-                              <td style={{...styles.td,fontFamily:'monospace',fontWeight:'600',fontSize:'0.8rem'}}>{s.subject_code}</td>
-                              <td style={styles.td}>{s.subject_name}</td>
+                          <tbody>{subjects
+                            .filter(s => s.pair_type !== 'PRACTICAL')
+                            .map(s => {
+                            const practicalSub = s.pair_code
+                              ? subjects.find(s2 => s2.subject_code.trim() === s.pair_code.trim())
+                              : null;
+                            const bgColor = s.status==='ACCEPTED'?'#f0fff4':s.status==='REJECTED'?'#fff5f5':!s.status?'#f7fafc':'#fff';
+                            return (
+                            <tr key={s.subject_id} style={{background:bgColor}}>
+                              <td style={{...styles.td,fontFamily:'monospace',fontWeight:'600',fontSize:'0.8rem'}}>
+                                <div>{s.subject_code} {s.pair_type==='THEORY' && <span style={{background:'#ebf8ff',color:'#2b6cb0',padding:'0.1rem 0.4rem',borderRadius:'4px',fontSize:'0.7rem'}}>📚T</span>}</div>
+                                {practicalSub && <div style={{color:'#718096',marginTop:'0.2rem'}}>{practicalSub.subject_code} <span style={{background:'#e6fffa',color:'#234e52',padding:'0.1rem 0.4rem',borderRadius:'4px',fontSize:'0.7rem'}}>🔬P</span></div>}
+                              </td>
+                              <td style={styles.td}>
+                                <div>{s.subject_name}</div>
+                                {practicalSub && <div style={{fontSize:'0.78rem',color:'#718096',marginTop:'0.2rem'}}>🔗 {practicalSub.subject_name} <span style={{color:'#2b6cb0'}}>(auto-paired)</span></div>}
+                              </td>
                               <td style={styles.td}>
                                 {s.discipline_name
                                   ? <span style={{background:'#ebf8ff',color:'#2b6cb0',padding:'0.15rem 0.5rem',borderRadius:'999px',fontSize:'0.75rem',fontWeight:'600'}}>{s.discipline_name}</span>
                                   : <span style={{color:'#a0aec0',fontSize:'0.75rem'}}>—</span>}
                               </td>
-                              <td style={{...styles.td,textAlign:'center'}}>{s.credits}</td>
-                              <td style={styles.td}>
-                                <span style={{...styles.badge,background:s.status==='ACCEPTED'?'#48bb78':s.status==='REJECTED'?'#e53e3e':s.status==='PENDING'?'#ed8936':'#a0aec0'}}>
-                                  {s.status||'NOT SET'}
-                                </span>
-                                {s.admin_modified ? <span style={{...styles.badge,background:'#9f7aea',marginLeft:'0.4rem',fontSize:'0.7rem'}}>✏️ Admin</span> : null}
+                              <td style={{...styles.td,textAlign:'center'}}>
+                                {practicalSub
+                                  ? <span title="Theory+Practical">{Number(s.credits)+Number(practicalSub.credits)}<span style={{fontSize:'0.7rem',color:'#a0aec0'}}> ({s.credits}+{practicalSub.credits})</span></span>
+                                  : s.credits}
                               </td>
                               <td style={styles.td}>
-                                <div style={{display:'flex',gap:'0.4rem'}}>
+                                <div>
+                                  <span style={{...styles.badge,background:s.status==='ACCEPTED'?'#48bb78':s.status==='REJECTED'?'#e53e3e':s.status==='PENDING'?'#ed8936':'#a0aec0'}}>
+                                    {s.status||'NOT SET'}
+                                  </span>
+                                  {s.admin_modified ? <span style={{...styles.badge,background:'#9f7aea',marginLeft:'0.4rem',fontSize:'0.7rem'}}>✏️ Admin</span> : null}
+                                </div>
+                                {practicalSub && (
+                                  <div style={{marginTop:'0.2rem'}}>
+                                    <span style={{...styles.badge,fontSize:'0.7rem',background:practicalSub.status==='ACCEPTED'?'#48bb78':practicalSub.status==='REJECTED'?'#e53e3e':practicalSub.status==='PENDING'?'#ed8936':'#a0aec0'}}>
+                                      P: {practicalSub.status||'NOT SET'}
+                                    </span>
+                                  </div>
+                                )}
+                              </td>
+                              <td style={styles.td}>
+                                <div style={{display:'flex',gap:'0.4rem',flexWrap:'wrap'}}>
                                   {['ACCEPTED','REJECTED','PENDING'].map(st=>(
-                                    <button key={st} onClick={()=>handleEnrollStatusChange(s.subject_id, st)}
+                                    <button key={st} onClick={()=>{
+                                        handleEnrollStatusChange(s.subject_id, st);
+                                        if (practicalSub) handleEnrollStatusChange(practicalSub.subject_id, st);
+                                      }}
                                       style={{padding:'0.25rem 0.6rem',fontSize:'0.75rem',border:'none',borderRadius:'5px',cursor:'pointer',fontWeight:'600',
                                         background:s.status===st?(st==='ACCEPTED'?'#48bb78':st==='REJECTED'?'#e53e3e':'#ed8936'):'#e2e8f0',
                                         color:s.status===st?'#fff':'#4a5568',opacity:s.status===st?1:0.7}}>
@@ -859,7 +1756,7 @@ export default function AdminDashboard({ admin, onLogout }) {
                                 </div>
                               </td>
                             </tr>
-                          ))}</tbody>
+                          )})}</tbody>
                         </table>
                       </div>
                     );
@@ -873,7 +1770,13 @@ export default function AdminDashboard({ admin, onLogout }) {
         {/* ATTENDANCE */}
         {activeTab === 'attendance' && (
           <div>
-            <div style={styles.readonlyBanner}>👁️ View Only — Attendance is marked by Teachers only</div>
+            <div style={{...styles.readonlyBanner, display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:'0.75rem'}}>
+              <span>👁️ Attendance is marked by Teachers only</span>
+              <div style={{display:'flex', gap:'0.5rem', flexWrap:'wrap'}}>
+                <button style={{...styles.templateBtn,whiteSpace:'nowrap'}} onClick={exportAttendanceProgrammeWise}>📥 Programme-wise (Excel)</button>
+                <button style={{...styles.templateBtn,whiteSpace:'nowrap',background:'#744210',color:'#fff'}} onClick={exportAttendanceSubjectWise}>📄 Subject-wise (Excel + PDF)</button>
+              </div>
+            </div>
             <h3>All Attendance Records ({attendance.length})</h3>
             <table style={styles.table}>
               <thead><tr>{['ID','Student','Subject','Date','Status'].map(h=><th key={h} style={styles.th}>{h}</th>)}</tr></thead>
@@ -893,53 +1796,178 @@ export default function AdminDashboard({ admin, onLogout }) {
         {/* FEES */}
         {activeTab === 'fees' && (
           <div>
-            <div style={styles.importBox}>
-              <h3 style={styles.importTitle}>📥 Import Fees from Excel</h3>
-              <div style={styles.importActions}>
-                <button style={styles.templateBtn} onClick={()=>downloadTemplate('fees')}>⬇️ Download Template</button>
-                <label style={{...styles.importBtn,opacity:importing?0.6:1}}>
-                  {importing?'⏳ Importing...':'📂 Choose Excel File'}
-                  <input ref={feeFileRef} type="file" accept=".xlsx,.xls" style={{display:'none'}} onChange={handleImportFees} disabled={importing} />
-                </label>
-              </div>
-              <p style={styles.importHint}>📋 Required: <strong>roll_no, amount, fee_type, due_date</strong></p>
+
+            {/* Summary Cards */}
+            <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(160px,1fr))',gap:'1rem',marginBottom:'1.5rem'}}>
+              {[
+                {label:'Total Records', value:fees.length, bg:'#ebf8ff', color:'#2b6cb0'},
+                {label:'Total Amount', value:`₹${fees.reduce((s,f)=>s+Number(f.amount),0).toLocaleString()}`, bg:'#f7fafc', color:'#2d3748'},
+                {label:'Paid', value:`₹${fees.filter(f=>f.status==='PAID').reduce((s,f)=>s+Number(f.amount),0).toLocaleString()}`, bg:'#f0fff4', color:'#276749'},
+                {label:'Pending', value:`₹${fees.filter(f=>f.status==='PENDING').reduce((s,f)=>s+Number(f.amount),0).toLocaleString()}`, bg:'#fffbeb', color:'#92400e'},
+                {label:'Overdue', value:`₹${fees.filter(f=>f.status==='OVERDUE').reduce((s,f)=>s+Number(f.amount),0).toLocaleString()}`, bg:'#fff5f5', color:'#c53030'},
+              ].map(item=>(
+                <div key={item.label} style={{background:item.bg,borderRadius:'10px',padding:'1rem',textAlign:'center',boxShadow:'0 2px 6px rgba(0,0,0,0.06)'}}>
+                  <p style={{fontSize:'1.4rem',fontWeight:'700',margin:0,color:item.color}}>{item.value}</p>
+                  <p style={{fontSize:'0.8rem',color:'#718096',margin:'0.25rem 0 0'}}>{item.label}</p>
+                </div>
+              ))}
             </div>
-            <h3>Add Fee Manually</h3>
-            <form onSubmit={handleAddFee} style={styles.form}>
-              <select style={styles.input} value={form.student_id||''} onChange={e=>setForm({...form,student_id:e.target.value})} required>
-                <option value="">Select Student</option>
-                {students.map(s=><option key={s.student_id} value={s.student_id}>{s.roll_no} - {s.name}</option>)}
-              </select>
-              <input style={styles.input} type="number" placeholder="Amount (₹)" value={form.amount||''} onChange={e=>setForm({...form,amount:e.target.value})} required />
-              <input style={styles.input} placeholder="Fee Type" value={form.fee_type||''} onChange={e=>setForm({...form,fee_type:e.target.value})} required />
-              <input style={styles.input} type="date" value={form.due_date||''} onChange={e=>setForm({...form,due_date:e.target.value})} required />
-              <button style={styles.addBtn} type="submit">Add Fee</button>
-            </form>
-            <h3>All Fee Records ({fees.length})</h3>
-            <table style={styles.table}>
-              <thead><tr>{['ID','Student','Roll No','Amount','Type','Due Date','Status','Action'].map(h=><th key={h} style={styles.th}>{h}</th>)}</tr></thead>
-              <tbody>{fees.map(f=>(
-                <tr key={f.fee_id}>
-                  <td style={styles.td}>{f.fee_id}</td><td style={styles.td}>{f.student_name}</td>
-                  <td style={styles.td}>{f.roll_no}</td><td style={styles.td}>₹{f.amount}</td>
-                  <td style={styles.td}>{f.fee_type}</td>
-                  <td style={styles.td}>{new Date(f.due_date).toLocaleDateString()}</td>
-                  <td style={styles.td}><span style={{...styles.badge,background:f.status==='PAID'?'#48bb78':f.status==='OVERDUE'?'#e53e3e':'#ed8936'}}>{f.status}</span></td>
-                  <td style={styles.td}>
-                    {f.status!=='PAID'
-                      ?<button style={styles.payBtn} onClick={()=>handleMarkPaid(f.fee_id)}>Mark Paid</button>
-                      :<span style={{color:'#48bb78',fontWeight:'600'}}>✅ Paid</span>}
-                  </td>
-                </tr>
-              ))}</tbody>
-            </table>
+
+            {/* Programme Summary */}
+            {feeSummary.length > 0 && (
+              <div style={{background:'#fff',borderRadius:'12px',padding:'1.25rem',marginBottom:'1.5rem',boxShadow:'0 2px 8px rgba(0,0,0,0.08)'}}>
+                <h3 style={{margin:'0 0 1rem',color:'#2d3748'}}>📊 Fee Summary by Programme</h3>
+                <table style={{...styles.table,boxShadow:'none'}}>
+                  <thead><tr>{['Programme','Level','Students','Total Amount','Paid','Pending','Overdue','Collection %'].map(h=><th key={h} style={styles.th}>{h}</th>)}</tr></thead>
+                  <tbody>{feeSummary.map((s,i)=>{
+                    const pct = s.total_amount > 0 ? ((s.paid_amount/s.total_amount)*100).toFixed(1) : 0;
+                    return (
+                      <tr key={i}>
+                        <td style={styles.td}><strong>{s.programme_name}</strong></td>
+                        <td style={styles.td}><span style={{background:s.level_name==='PG'?'#805ad5':'#4c51bf',color:'#fff',padding:'0.15rem 0.5rem',borderRadius:'999px',fontSize:'0.75rem'}}>{s.level_name}</span></td>
+                        <td style={{...styles.td,textAlign:'center'}}>{s.total_students}</td>
+                        <td style={styles.td}><strong>₹{Number(s.total_amount).toLocaleString()}</strong></td>
+                        <td style={styles.td}><span style={{color:'#276749',fontWeight:'600'}}>₹{Number(s.paid_amount).toLocaleString()}</span></td>
+                        <td style={styles.td}><span style={{color:'#92400e',fontWeight:'600'}}>₹{Number(s.pending_amount).toLocaleString()}</span></td>
+                        <td style={styles.td}><span style={{color:'#c53030',fontWeight:'600'}}>₹{Number(s.overdue_amount).toLocaleString()}</span></td>
+                        <td style={styles.td}>
+                          <div style={{display:'flex',alignItems:'center',gap:'0.5rem'}}>
+                            <div style={{flex:1,height:'8px',background:'#e2e8f0',borderRadius:'999px',overflow:'hidden'}}>
+                              <div style={{width:`${pct}%`,height:'100%',background:pct>=75?'#48bb78':pct>=50?'#ed8936':'#e53e3e',borderRadius:'999px'}}/>
+                            </div>
+                            <span style={{fontSize:'0.8rem',fontWeight:'600',minWidth:'36px'}}>{pct}%</span>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}</tbody>
+                </table>
+              </div>
+            )}
+
+            {/* Bulk Fee Generation */}
+            <div style={{background:'#fff',borderRadius:'12px',padding:'1.25rem',marginBottom:'1.5rem',boxShadow:'0 2px 8px rgba(0,0,0,0.08)'}}>
+              <h3 style={{margin:'0 0 1rem',color:'#2d3748'}}>⚡ Bulk Fee Generation</h3>
+              <form onSubmit={handleBulkFee} style={{display:'flex',gap:'0.75rem',flexWrap:'wrap',alignItems:'flex-end'}}>
+                <div style={{display:'flex',flexDirection:'column',gap:'0.3rem'}}>
+                  <label style={{fontSize:'0.8rem',color:'#4a5568',fontWeight:'600'}}>Programme (optional)</label>
+                  <select style={{...styles.input,margin:0,minWidth:'180px'}} value={bulkFeeForm.programme_id||''} onChange={e=>setBulkFeeForm({...bulkFeeForm,programme_id:e.target.value||undefined})}>
+                    <option value="">All Students</option>
+                    {programmes.map(p=><option key={p.programme_id} value={p.programme_id}>{p.programme_name}</option>)}
+                  </select>
+                </div>
+                <div style={{display:'flex',flexDirection:'column',gap:'0.3rem'}}>
+                  <label style={{fontSize:'0.8rem',color:'#4a5568',fontWeight:'600'}}>Fee Type</label>
+                  <select style={{...styles.input,margin:0}} value={bulkFeeForm.fee_type||''} onChange={e=>setBulkFeeForm({...bulkFeeForm,fee_type:e.target.value})} required>
+                    <option value="">Select Type</option>
+                    <option value="Tuition Fee">Tuition Fee</option>
+                    <option value="Exam Fee">Exam Fee</option>
+                    <option value="Library Fee">Library Fee</option>
+                    <option value="Sports Fee">Sports Fee</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </div>
+                <div style={{display:'flex',flexDirection:'column',gap:'0.3rem'}}>
+                  <label style={{fontSize:'0.8rem',color:'#4a5568',fontWeight:'600'}}>Amount (₹)</label>
+                  <input style={{...styles.input,margin:0}} type="number" placeholder="e.g. 15000" value={bulkFeeForm.amount||''} onChange={e=>setBulkFeeForm({...bulkFeeForm,amount:e.target.value})} required />
+                </div>
+                <div style={{display:'flex',flexDirection:'column',gap:'0.3rem'}}>
+                  <label style={{fontSize:'0.8rem',color:'#4a5568',fontWeight:'600'}}>Due Date</label>
+                  <input style={{...styles.input,margin:0}} type="date" value={bulkFeeForm.due_date||''} onChange={e=>setBulkFeeForm({...bulkFeeForm,due_date:e.target.value})} required />
+                </div>
+                <button style={{...styles.addBtn,whiteSpace:'nowrap'}} type="submit">⚡ Generate Fees</button>
+              </form>
+            </div>
+
+            {/* Add Fee + Import */}
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'1.5rem',marginBottom:'1.5rem'}}>
+              <div style={{background:'#fff',borderRadius:'12px',padding:'1.25rem',boxShadow:'0 2px 8px rgba(0,0,0,0.08)'}}>
+                <h3 style={{margin:'0 0 1rem',color:'#2d3748'}}>➕ Add Fee Manually</h3>
+                <form onSubmit={handleAddFee} style={{display:'flex',flexDirection:'column',gap:'0.75rem'}}>
+                  <select style={{...styles.input,margin:0}} value={form.student_id||''} onChange={e=>setForm({...form,student_id:e.target.value})} required>
+                    <option value="">Select Student</option>
+                    {students.map(s=><option key={s.student_id} value={s.student_id}>{s.roll_no} - {s.name}</option>)}
+                  </select>
+                  <select style={{...styles.input,margin:0}} value={form.fee_type||''} onChange={e=>setForm({...form,fee_type:e.target.value})} required>
+                    <option value="">Select Fee Type</option>
+                    <option value="Tuition Fee">Tuition Fee</option>
+                    <option value="Exam Fee">Exam Fee</option>
+                    <option value="Library Fee">Library Fee</option>
+                    <option value="Sports Fee">Sports Fee</option>
+                    <option value="Other">Other</option>
+                  </select>
+                  <input style={{...styles.input,margin:0}} type="number" placeholder="Amount (₹)" value={form.amount||''} onChange={e=>setForm({...form,amount:e.target.value})} required />
+                  <input style={{...styles.input,margin:0}} type="date" value={form.due_date||''} onChange={e=>setForm({...form,due_date:e.target.value})} required />
+                  <button style={styles.addBtn} type="submit">Add Fee</button>
+                </form>
+              </div>
+              <div style={{background:'#fff',borderRadius:'12px',padding:'1.25rem',boxShadow:'0 2px 8px rgba(0,0,0,0.08)'}}>
+                <h3 style={{margin:'0 0 1rem',color:'#2d3748'}}>📥 Import from Excel</h3>
+                <div style={styles.importActions}>
+                  <button style={styles.templateBtn} onClick={()=>downloadTemplate('fees')}>⬇️ Download Template</button>
+                  <label style={{...styles.importBtn,opacity:importing?0.6:1}}>
+                    {importing?'⏳ Importing...':'📂 Choose Excel File'}
+                    <input ref={feeFileRef} type="file" accept=".xlsx,.xls" style={{display:'none'}} onChange={handleImportFees} disabled={importing} />
+                  </label>
+                </div>
+                <p style={styles.importHint}>📋 Required: <strong>roll_no, amount, fee_type, due_date</strong></p>
+                <div style={{marginTop:'1rem',padding:'0.75rem',background:'#fffbeb',borderRadius:'8px',border:'1px solid #fcd34d'}}>
+                  <p style={{margin:0,fontSize:'0.82rem',color:'#92400e',fontWeight:'600'}}>⚡ Auto Mark Overdue</p>
+                  <p style={{margin:'0.25rem 0 0.5rem',fontSize:'0.8rem',color:'#718096'}}>Fees past due date are auto-marked overdue when you open this tab.</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Fee Records Table */}
+            <div style={{background:'#fff',borderRadius:'12px',overflow:'hidden',boxShadow:'0 2px 8px rgba(0,0,0,0.08)'}}>
+              <div style={{padding:'1rem 1.25rem',display:'flex',justifyContent:'space-between',alignItems:'center',borderBottom:'1px solid #e2e8f0'}}>
+                <h3 style={{margin:0}}>All Fee Records ({fees.length})</h3>
+                <input style={{...styles.input,margin:0,minWidth:'220px'}} placeholder="🔍 Search student..."
+                  value={feeFilter} onChange={e=>setFeeFilter(e.target.value)} />
+              </div>
+              <table style={{...styles.table,boxShadow:'none'}}>
+                <thead><tr>{['Student','Roll No','Programme','Fee Type','Amount','Due Date','Paid Date','Status','Action'].map(h=><th key={h} style={styles.th}>{h}</th>)}</tr></thead>
+                <tbody>{fees
+                  .filter(f => !feeFilter || f.student_name?.toLowerCase().includes(feeFilter.toLowerCase()) || f.roll_no?.toLowerCase().includes(feeFilter.toLowerCase()))
+                  .map(f=>(
+                  <tr key={f.fee_id} style={{background:f.status==='OVERDUE'?'#fff5f5':f.status==='PAID'?'#f0fff4':'#fff'}}>
+                    <td style={styles.td}><strong>{f.student_name}</strong></td>
+                    <td style={{...styles.td,fontFamily:'monospace',fontWeight:'700'}}>{f.roll_no}</td>
+                    <td style={styles.td}>{f.programme_name||'—'}</td>
+                    <td style={styles.td}>{f.fee_type}</td>
+                    <td style={{...styles.td,fontWeight:'700'}}>₹{Number(f.amount).toLocaleString()}</td>
+                    <td style={styles.td}>{f.due_date ? new Date(f.due_date).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'}) : '—'}</td>
+                    <td style={styles.td}>{f.paid_date ? new Date(f.paid_date).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'}) : '—'}</td>
+                    <td style={styles.td}>
+                      <span style={{...styles.badge,background:f.status==='PAID'?'#48bb78':f.status==='OVERDUE'?'#e53e3e':'#ed8936'}}>
+                        {f.status==='PAID'?'✅ Paid':f.status==='OVERDUE'?'🔴 Overdue':'⏳ Pending'}
+                      </span>
+                    </td>
+                    <td style={styles.td}>
+                      {f.status!=='PAID'
+                        ? <button style={styles.payBtn} onClick={()=>handleMarkPaid(f.fee_id)}>💰 Mark Paid</button>
+                        : <span style={{color:'#48bb78',fontWeight:'600',fontSize:'0.82rem'}}>{f.transaction_ref}</span>}
+                    </td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            </div>
           </div>
         )}
 
         {/* MARKS */}
         {activeTab === 'marks' && (
           <div>
-            <div style={styles.readonlyBanner}>👁️ View Only — Marks are entered by Teachers only</div>
+            <div style={{...styles.readonlyBanner, display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:'0.75rem'}}>
+              <span>👁️ Marks are entered by Teachers only</span>
+              <div style={{display:'flex', gap:'0.5rem', flexWrap:'wrap'}}>
+                <button style={{...styles.templateBtn,whiteSpace:'nowrap'}} onClick={exportMarksProgrammeWise}>📥 Programme-wise</button>
+                <button style={{...styles.templateBtn,whiteSpace:'nowrap'}} onClick={exportMarksSemesterWise}>📅 Semester-wise</button>
+                <button style={{...styles.templateBtn,whiteSpace:'nowrap'}} onClick={exportMarksOddSem}>📋 Odd Sem</button>
+                <button style={{...styles.templateBtn,whiteSpace:'nowrap'}} onClick={exportMarksEvenSem}>📋 Even Sem</button>
+                <button style={{...styles.templateBtn,whiteSpace:'nowrap',background:'#744210',color:'#fff'}} onClick={exportSubjectMarks}>📄 Subject-wise (Excel + PDF)</button>
+              </div>
+            </div>
             <h3>All Marks Records ({marks.length})</h3>
             <table style={styles.table}>
               <thead><tr>{['ID','Student','Subject','Exam Type','Marks','Max','Percentage','Semester'].map(h=><th key={h} style={styles.th}>{h}</th>)}</tr></thead>

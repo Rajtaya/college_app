@@ -200,14 +200,35 @@ export default function StudentEnrollment({ student, onBack }) {
         }
       }
 
-      // Auto-reject other MDC groups
+      // Auto-reject other MDC groups (keep pair partner of selected subject)
       if (sub.category === 'MDC' && newStatus === 'ACCEPTED') {
         const selectedBase = getBaseCode(sub.subject_code);
         subjects.forEach(s => {
           if (s.category === 'MDC' && getBaseCode(s.subject_code) !== selectedBase) {
-            updated[s.subject_id] = { ...prev[s.subject_id], status: 'REJECTED' };
+            updated[s.subject_id] = { ...updated[s.subject_id], status: 'REJECTED' };
           }
         });
+      }
+
+      // Auto-reject other SEC groups (keep pair partner of selected subject)
+      if (sub.category === 'SEC' && newStatus === 'ACCEPTED' && sub.pair_code) {
+        const selectedBase = getBaseCode(sub.subject_code);
+        subjects.forEach(s => {
+          if (s.category === 'SEC' && getBaseCode(s.subject_code) !== selectedBase) {
+            updated[s.subject_id] = { ...updated[s.subject_id], status: 'REJECTED' };
+          }
+        });
+      }
+
+      // Auto-reject other MAJOR groups when credits reached (keep pair partner)
+      if (!isPG && sub.category === 'MAJOR' && newStatus === 'ACCEPTED') {
+        // Re-check after auto-pair
+        const selectedBase = getBaseCode(sub.subject_code);
+        // Only reject unrelated subjects if pair was also accepted
+        const pairAccepted = !sub.pair_code || updated[subjects.find(s => s.subject_code.trim() === sub.pair_code?.trim())?.subject_id]?.status === 'ACCEPTED';
+        if (pairAccepted) {
+          // Credit check handled below
+        }
       }
 
       // UG MAJOR: auto-reject when 12 credits reached
@@ -496,7 +517,9 @@ export default function StudentEnrollment({ student, onBack }) {
             <div style={{...s.categoryHeader, background: categoryColors[category]||'#667eea'}}>
               <div>
                 <span style={s.catTitle}>{categoryLabels[category]||category}</span>
-                <span style={s.catCount}>{grouped[category].length} subjects</span>
+                <span style={s.catCount}>
+                  {grouped[category].filter(sub => sub.pair_type !== 'PRACTICAL').length} subject{grouped[category].filter(sub => sub.pair_type !== 'PRACTICAL').length !== 1 ? 's' : ''}
+                </span>
                 {fixed && <span style={s.fixedBadge}>🔒 Compulsory</span>}
               </div>
               <div style={s.catStatus}>
@@ -523,28 +546,52 @@ export default function StudentEnrollment({ student, onBack }) {
                 </tr>
               </thead>
               <tbody>
-                {grouped[category].filter(sub => !submitted || enrollments[sub.subject_id]?.status === "ACCEPTED").map(sub => {
+                {grouped[category]
+                  .filter(sub => {
+                    // Hide PRACTICAL rows — they follow Theory automatically
+                    if (sub.pair_type === 'PRACTICAL') return false;
+                    // When submitted, only show accepted
+                    if (submitted && enrollments[sub.subject_id]?.status !== 'ACCEPTED') return false;
+                    return true;
+                  })
+                  .map(sub => {
                   const enroll  = enrollments[sub.subject_id] || {};
                   const status  = enroll.status || 'PENDING';
                   const isPaired = sub.pair_code !== null;
-                  const rowBg   = status==='ACCEPTED'?'#f0fff4':status==='REJECTED'?'#fff5f5':'#fff';
+                  // Find practical partner
+                  const practicalSub = isPaired && sub.pair_type === 'THEORY'
+                    ? grouped[category].find(s2 => s2.subject_code.trim() === sub.pair_code?.trim())
+                    : null;
+                  const rowBg = status==='ACCEPTED'?'#f0fff4':status==='REJECTED'?'#fff5f5':'#fff';
 
                   return (
                     <tr key={sub.subject_id} style={{background:rowBg, transition:'background 0.2s'}}>
                       <td style={{...s.td, fontFamily:'monospace', fontWeight:'600', fontSize:'0.8rem'}}>
-                        {sub.subject_code}
-                        {isPaired && <span style={s.pairTag}>{sub.pair_type==='THEORY'?'📚T':'🔬P'}</span>}
+                        <div>{sub.subject_code} <span style={s.pairTag}>📚 Theory</span></div>
+                        {practicalSub && (
+                          <div style={{marginTop:'0.2rem', color:'#718096'}}>
+                            {practicalSub.subject_code} <span style={{...s.pairTag, background:'#bee3f8', color:'#2b6cb0'}}>🔬 Practical</span>
+                          </div>
+                        )}
                       </td>
                       <td style={s.td}>
-                        {sub.subject_name}
-                        {isPaired && <div style={s.pairHint}>🔗 Paired with {sub.pair_code}</div>}
+                        <div>{sub.subject_name}</div>
+                        {practicalSub && (
+                          <div style={{fontSize:'0.78rem', color:'#718096', marginTop:'0.2rem'}}>
+                            🔗 {practicalSub.subject_name} <span style={{color:'#2b6cb0'}}>(auto-paired)</span>
+                          </div>
+                        )}
                       </td>
                       <td style={s.td}>
                         {sub.discipline_name
                           ? <span style={s.discBadge}>{sub.discipline_name}</span>
                           : <span style={{color:'#a0aec0',fontSize:'0.75rem'}}>-</span>}
                       </td>
-                      <td style={{...s.td, textAlign:'center'}}>{sub.credits}</td>
+                      <td style={{...s.td, textAlign:'center'}}>
+                        {practicalSub
+                          ? <span title="Theory + Practical">{Number(sub.credits) + Number(practicalSub.credits)}<span style={{fontSize:'0.7rem',color:'#718096'}}> ({sub.credits}+{practicalSub.credits})</span></span>
+                          : sub.credits}
+                      </td>
                       <td style={{...s.td, textAlign:'center'}}>{sub.internal_marks||'-'}</td>
                       <td style={{...s.td, textAlign:'center'}}>{sub.end_term_marks||'-'}</td>
                       <td style={{...s.td, textAlign:'center', fontWeight:'700'}}>{sub.total_marks||'-'}</td>

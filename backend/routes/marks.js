@@ -5,15 +5,19 @@ const { verify } = require('../middleware/auth');
 
 router.use(verify());
 
-// POST / — Add marks (upsert on student+subject+exam_type)
+// Visibility rules — which exam types are visible to students
+const STUDENT_VISIBLE = new Set(['INTERNAL','ASSIGNMENT','PRACTICAL_INTERNAL']);
+
+// POST / — Add/update marks (upsert on student+subject+exam_type)
 router.post('/', verify('teacher', 'admin'), async (req, res) => {
   const { student_id, subject_id, exam_type, marks_obtained, max_marks, semester } = req.body;
+  const is_visible = STUDENT_VISIBLE.has(exam_type) ? 1 : 0;
   try {
     const [result] = await db.query(
-      `INSERT INTO marks (student_id, subject_id, exam_type, marks_obtained, max_marks, semester)
-       VALUES (?, ?, ?, ?, ?, ?)
+      `INSERT INTO marks (student_id, subject_id, exam_type, marks_obtained, max_marks, semester, is_visible_to_student)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
        ON DUPLICATE KEY UPDATE marks_obtained=VALUES(marks_obtained), max_marks=VALUES(max_marks)`,
-      [student_id, subject_id, exam_type, marks_obtained, max_marks, semester]
+      [student_id, subject_id, exam_type, marks_obtained, max_marks, semester, is_visible]
     );
     res.json({ message: 'Marks saved', mark_id: result.insertId });
   } catch (err) {
@@ -21,11 +25,51 @@ router.post('/', verify('teacher', 'admin'), async (req, res) => {
   }
 });
 
-// GET /student/:student_id — All marks for a student
+// POST /bulk — Bulk save marks for entire class
+router.post('/bulk', verify('teacher', 'admin'), async (req, res) => {
+  const { entries, subject_id, exam_type, max_marks, semester } = req.body;
+  // entries = [{student_id, marks_obtained}]
+  const is_visible = STUDENT_VISIBLE.has(exam_type) ? 1 : 0;
+  try {
+    let saved = 0;
+    for (const e of entries) {
+      if (e.marks_obtained === '' || e.marks_obtained === null || e.marks_obtained === undefined) continue;
+      await db.query(
+        `INSERT INTO marks (student_id, subject_id, exam_type, marks_obtained, max_marks, semester, is_visible_to_student)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE marks_obtained=VALUES(marks_obtained), max_marks=VALUES(max_marks)`,
+        [e.student_id, subject_id, exam_type, Number(e.marks_obtained), max_marks, semester, is_visible]
+      );
+      saved++;
+    }
+    res.json({ message: `Marks saved for ${saved} student(s)` });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /student/:student_id — Marks visible to student only
 router.get('/student/:student_id', async (req, res) => {
   try {
     const [rows] = await db.query(
-      `SELECT m.*, s.subject_name, s.subject_code, s.category
+      `SELECT m.*, s.subject_name, s.subject_code, s.category, s.credits
+       FROM marks m
+       JOIN subjects s ON m.subject_id = s.subject_id
+       WHERE m.student_id = ? AND m.is_visible_to_student = 1
+       ORDER BY s.subject_name, m.exam_type`,
+      [req.params.student_id]
+    );
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /student/:student_id/all — All marks including external (admin/teacher view)
+router.get('/student/:student_id/all', async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      `SELECT m.*, s.subject_name, s.subject_code, s.category, s.credits
        FROM marks m
        JOIN subjects s ON m.subject_id = s.subject_id
        WHERE m.student_id = ?

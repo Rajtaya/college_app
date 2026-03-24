@@ -191,10 +191,132 @@ router.get('/attendance', async (req, res) => {
   } catch (err) { console.error(err); res.status(500).json({ error: 'Internal server error' }); }
 });
 
+// GET /admin/attendance/export — Full attendance export for all students
+router.get('/attendance/export', async (req, res) => {
+  try {
+    const [rows] = await db.query(`
+      SELECT
+        st.roll_no, st.name as student_name,
+        p.programme_name, l.level_name, st.semester,
+        sub.subject_code, sub.subject_name, sub.category,
+        a.date, a.status as attendance_status
+      FROM attendance a
+      JOIN students st ON a.student_id = st.student_id
+      JOIN subjects sub ON a.subject_id = sub.subject_id
+      LEFT JOIN programmes p ON st.programme_id = p.programme_id
+      LEFT JOIN levels l ON st.level_id = l.level_id
+      ORDER BY p.programme_name, st.roll_no, sub.subject_code, a.date`
+    );
+    res.json(rows);
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Internal server error' }); }
+});
+
+// GET /admin/attendance/summary — Attendance summary per student per subject
+router.get('/attendance/summary', async (req, res) => {
+  try {
+    const [rows] = await db.query(`
+      SELECT
+        st.roll_no, st.name as student_name,
+        p.programme_name, l.level_name, st.semester,
+        sub.subject_code, sub.subject_name, sub.category,
+        COUNT(a.attendance_id) as total_classes,
+        SUM(CASE WHEN a.status = 'PRESENT' THEN 1 ELSE 0 END) as present,
+        SUM(CASE WHEN a.status = 'ABSENT' THEN 1 ELSE 0 END) as absent,
+        SUM(CASE WHEN a.status = 'LATE' THEN 1 ELSE 0 END) as late,
+        ROUND((SUM(CASE WHEN a.status IN ('PRESENT','LATE') THEN 1 ELSE 0 END) / COUNT(a.attendance_id)) * 100, 1) as attendance_pct
+      FROM attendance a
+      JOIN students st ON a.student_id = st.student_id
+      JOIN subjects sub ON a.subject_id = sub.subject_id
+      LEFT JOIN programmes p ON st.programme_id = p.programme_id
+      LEFT JOIN levels l ON st.level_id = l.level_id
+      GROUP BY st.student_id, sub.subject_id
+      ORDER BY p.programme_name, st.roll_no, sub.subject_code`
+    );
+    res.json(rows);
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Internal server error' }); }
+});
+
 router.get('/fees', async (req, res) => {
   try {
-    const [rows] = await db.query(`SELECT f.*, s.name as student_name, s.roll_no FROM fees f JOIN students s ON f.student_id = s.student_id`);
+    const [rows] = await db.query(
+      `SELECT f.*, s.name as student_name, s.roll_no, p.programme_name, l.level_name, s.semester
+       FROM fees f
+       JOIN students s ON f.student_id = s.student_id
+       LEFT JOIN programmes p ON s.programme_id = p.programme_id
+       LEFT JOIN levels l ON s.level_id = l.level_id
+       ORDER BY f.due_date DESC`
+    );
     res.json(rows);
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Internal server error' }); }
+});
+
+// GET /admin/fees/summary — Fee summary by programme
+router.get('/fees/summary', async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      `SELECT 
+         p.programme_name, l.level_name,
+         COUNT(f.fee_id) as total_records,
+         COUNT(DISTINCT f.student_id) as total_students,
+         SUM(f.amount) as total_amount,
+         SUM(CASE WHEN f.status='PAID' THEN f.amount ELSE 0 END) as paid_amount,
+         SUM(CASE WHEN f.status='PENDING' THEN f.amount ELSE 0 END) as pending_amount,
+         SUM(CASE WHEN f.status='OVERDUE' THEN f.amount ELSE 0 END) as overdue_amount,
+         COUNT(CASE WHEN f.status='PAID' THEN 1 END) as paid_count,
+         COUNT(CASE WHEN f.status='PENDING' THEN 1 END) as pending_count,
+         COUNT(CASE WHEN f.status='OVERDUE' THEN 1 END) as overdue_count
+       FROM fees f
+       JOIN students s ON f.student_id = s.student_id
+       LEFT JOIN programmes p ON s.programme_id = p.programme_id
+       LEFT JOIN levels l ON s.level_id = l.level_id
+       GROUP BY p.programme_id
+       ORDER BY l.level_name, p.programme_name`
+    );
+    res.json(rows);
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Internal server error' }); }
+});
+
+// POST /admin/fees/bulk — Generate fees for all students
+router.post('/fees/bulk', async (req, res) => {
+  const { amount, fee_type, due_date, programme_id } = req.body;
+  try {
+    // Get students — filter by programme if provided
+    let query = 'SELECT student_id FROM students';
+    let params = [];
+    if (programme_id) {
+      query += ' WHERE programme_id = ?';
+      params = [programme_id];
+    }
+    const [students] = await db.query(query, params);
+    if (!students.length) return res.status(404).json({ error: 'No students found' });
+
+    let inserted = 0;
+    for (const s of students) {
+      // Check if fee already exists for this student/type/due_date
+      const [existing] = await db.query(
+        'SELECT fee_id FROM fees WHERE student_id=? AND fee_type=? AND due_date=?',
+        [s.student_id, fee_type, due_date]
+      );
+      if (!existing.length) {
+        await db.query(
+          'INSERT INTO fees (student_id, amount, fee_type, due_date) VALUES (?,?,?,?)',
+          [s.student_id, amount, fee_type, due_date]
+        );
+        inserted++;
+      }
+    }
+    res.json({ message: `Fee generated for ${inserted} student(s)`, inserted, skipped: students.length - inserted });
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Internal server error' }); }
+});
+
+// PUT /admin/fees/mark-overdue — Auto mark overdue fees
+router.put('/fees/mark-overdue', async (req, res) => {
+  try {
+    const [result] = await db.query(
+      `UPDATE fees SET status='OVERDUE'
+       WHERE status='PENDING' AND due_date < CURDATE()`
+    );
+    res.json({ message: `${result.affectedRows} fee(s) marked as overdue` });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Internal server error' }); }
 });
 
@@ -205,12 +327,35 @@ router.get('/marks', async (req, res) => {
   } catch (err) { console.error(err); res.status(500).json({ error: 'Internal server error' }); }
 });
 
+// GET /admin/marks/export — All marks for export
+router.get('/marks/export', async (req, res) => {
+  try {
+    const [rows] = await db.query(`
+      SELECT
+        st.roll_no, st.name as student_name,
+        p.programme_name, l.level_name, st.semester,
+        sub.subject_code, sub.subject_name, sub.category, sub.credits,
+        m.exam_type, m.marks_obtained, m.max_marks,
+        ROUND((m.marks_obtained / m.max_marks) * 100, 1) as percentage
+      FROM marks m
+      JOIN students st ON m.student_id = st.student_id
+      JOIN subjects sub ON m.subject_id = sub.subject_id
+      LEFT JOIN programmes p ON st.programme_id = p.programme_id
+      LEFT JOIN levels l ON st.level_id = l.level_id
+      ORDER BY l.level_name, p.programme_name, st.roll_no, sub.subject_code, m.exam_type`
+    );
+    res.json(rows);
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Internal server error' }); }
+});
+
 router.delete('/marks/:id', async (req, res) => {
   try {
     await db.query('DELETE FROM marks WHERE mark_id = ?', [req.params.id]);
     res.json({ message: 'Mark deleted' });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Internal server error' }); }
 });
+
+
 
 router.get('/enrollment/summary', async (req, res) => {
   try {
@@ -267,6 +412,70 @@ router.get('/enrollment/detail/:student_id', async (req, res) => {
       isPG
         ? [s.programme_id, req.params.student_id, s.semester]
         : [req.params.student_id, s.programme_id, s.semester, s.programme_id]
+    );
+    // Add T/P pairing info — same as student enrollment route
+    const enriched = rows.map(sub => {
+      let pair_code = null;
+      let pair_type = null;
+      if (['MDC', 'SEC', 'MAJOR'].includes(sub.category)) {
+        const code = sub.subject_code.trim();
+        const lastChar = code.slice(-1).toUpperCase();
+        if (lastChar === 'T') {
+          const pCode = code.slice(0, -1) + 'P';
+          const pair = rows.find(s2 => s2.subject_code.trim() === pCode && s2.category === sub.category);
+          if (pair) { pair_code = pCode; pair_type = 'THEORY'; }
+        } else if (lastChar === 'P') {
+          const tCode = code.slice(0, -1) + 'T';
+          const pair = rows.find(s2 => s2.subject_code.trim() === tCode && s2.category === sub.category);
+          if (pair) { pair_code = tCode; pair_type = 'PRACTICAL'; }
+        }
+      }
+      return { ...sub, pair_code, pair_type };
+    });
+
+    res.json(enriched);
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Internal server error' }); }
+});
+
+// GET /admin/enrollment/export — Full enrollment export for ALL students ALL programmes
+router.get('/enrollment/export', async (req, res) => {
+  try {
+    const [rows] = await db.query(`
+      SELECT
+        st.roll_no, st.name as student_name,
+        p.programme_name, l.level_name, st.semester,
+        sub.subject_code, sub.subject_name, sub.category, sub.credits,
+        d.discipline_name,
+        e.status,
+        CASE WHEN e.is_major = 1 THEN 'Yes' ELSE 'No' END as is_major,
+        CASE WHEN e.admin_modified = 1 THEN 'Yes' ELSE 'No' END as admin_modified,
+        e.remarks
+      FROM students st
+      JOIN student_subject_enrollment e ON st.student_id = e.student_id
+      JOIN subjects sub ON e.subject_id = sub.subject_id
+      LEFT JOIN programmes p ON st.programme_id = p.programme_id
+      LEFT JOIN levels l ON st.level_id = l.level_id
+      LEFT JOIN disciplines d ON sub.discipline_id = d.discipline_id
+      WHERE e.status = 'ACCEPTED'
+        AND e.is_draft = 0
+      ORDER BY l.level_name, p.programme_name, st.roll_no, sub.category, sub.subject_code`
+    );
+    res.json(rows);
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Internal server error' }); }
+});
+
+// GET /admin/enrollment/export-subject-wise — Subject-wise enrolled students
+router.get('/enrollment/export-subject-wise', async (req, res) => {
+  try {
+    const [rows] = await db.query(`
+      SELECT sub.subject_code, sub.subject_name, sub.category, sub.semester, sub.credits,
+             p.programme_name, st.roll_no, st.name as student_name, e.status
+      FROM student_subject_enrollment e
+      JOIN subjects sub ON e.subject_id = sub.subject_id
+      JOIN students st ON e.student_id = st.student_id
+      LEFT JOIN programmes p ON sub.programme_id = p.programme_id
+      WHERE e.status = 'ACCEPTED' AND e.is_draft = 0
+      ORDER BY sub.subject_code, st.roll_no`
     );
     res.json(rows);
   } catch (err) { console.error(err); res.status(500).json({ error: 'Internal server error' }); }

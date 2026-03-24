@@ -118,19 +118,28 @@ export default function TeacherDashboard({ teacher, onLogout }) {
     setMarksLoading(false);
   };
 
+  const getMaxMarks = (type, sub) => {
+    if (type === 'INTERNAL') return sub?.internal_marks || 30;
+    if (type === 'ASSIGNMENT') return 10;
+    if (type === 'PRACTICAL_INTERNAL') return 20;
+    if (type === 'EXTERNAL') return sub?.end_term_marks || 70;
+    return 30;
+  };
+
   const submitMarks = async () => {
-    const toSave = classMarks.filter(s => s.marks !== '' && s.marks !== null);
+    const toSave = classMarks.filter(s => s.marks !== '' && s.marks !== null && s.marks !== undefined);
     if (!toSave.length) { showMsg('No marks to save', 'error'); return; }
     try {
       const sub = allSubjects.find(s => String(s.subject_id) === String(marksSubject));
-      for (const s of toSave) {
-        await API.post('/marks', {
-          student_id: s.student_id, subject_id: marksSubject,
-          exam_type: examType, marks_obtained: Number(s.marks),
-          max_marks: sub?.internal_marks || 30, semester: sub?.semester || 1
-        });
-      }
-      showMsg(`Marks saved for ${toSave.length} students!`);
+      await API.post('/marks/bulk', {
+        subject_id: marksSubject,
+        exam_type: examType,
+        max_marks: getMaxMarks(examType, sub),
+        semester: sub?.semester || 1,
+        entries: toSave.map(s => ({ student_id: s.student_id, marks_obtained: Number(s.marks) }))
+      });
+      showMsg(`✅ Marks saved for ${toSave.length} students!`);
+      loadClassMarks();
     } catch(e) { showMsg(e.response?.data?.error || 'Failed', 'error'); }
   };
 
@@ -301,77 +310,160 @@ export default function TeacherDashboard({ teacher, onLogout }) {
         {/* MARKS TAB */}
         {activeTab === 'marks' && (
           <div>
+            {/* Enter Marks */}
             <div style={st.card}>
               <h3 style={st.cardTitle}>✏️ Enter Marks</h3>
-              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr auto', gap:'12px', marginBottom:'1rem', alignItems:'end' }}>
+              <div style={{display:'grid', gridTemplateColumns:'1fr 1fr auto', gap:'12px', marginBottom:'1rem', alignItems:'end'}}>
                 <div>
                   <label style={st.label}>Subject</label>
-                  <select style={st.select} value={marksSubject} onChange={e => setMarksSubject(e.target.value)}>
+                  <select style={st.select} value={marksSubject} onChange={e=>setMarksSubject(e.target.value)}>
                     <option value="">Select subject...</option>
-                    {subjects.map(s => <option key={s.assignment_id} value={s.subject_id}>{s.subject_code} — {s.subject_name} (Sec {s.section})</option>)}
+                    {subjects.map(s=><option key={s.assignment_id} value={s.subject_id}>{s.subject_code} — {s.subject_name} (Sec {s.section})</option>)}
                   </select>
                 </div>
                 <div>
                   <label style={st.label}>Exam Type</label>
-                  <select style={st.select} value={examType} onChange={e => setExamType(e.target.value)}>
-                    <option value="INTERNAL">Internal</option>
-                    <option value="EXTERNAL">External</option>
-                    <option value="PRACTICAL">Practical</option>
+                  <select style={st.select} value={examType} onChange={e=>setExamType(e.target.value)}>
+                    <option value="INTERNAL">📝 Internal Exam</option>
+                    <option value="ASSIGNMENT">📋 Assignment</option>
+                    <option value="PRACTICAL_INTERNAL">🔬 Practical Internal</option>
+                    <option value="EXTERNAL">📄 External (End Term)</option>
                   </select>
                 </div>
-                <div></div>
-                <button style={st.loadBtn} onClick={loadClassMarks} disabled={marksLoading}>Load</button>
+                <button style={st.loadBtn} onClick={loadClassMarks} disabled={marksLoading}>
+                  {marksLoading ? '⏳' : '🔄 Load'}
+                </button>
               </div>
+
+              {/* Max marks info */}
+              {marksSubject && (
+                <div style={{background:'#ebf8ff',borderRadius:'8px',padding:'0.6rem 1rem',marginBottom:'1rem',fontSize:'0.85rem',color:'#2b6cb0',fontWeight:'600'}}>
+                  ℹ️ Max Marks for {examType==='INTERNAL'?'Internal Exam':examType==='ASSIGNMENT'?'Assignment':examType==='PRACTICAL_INTERNAL'?'Practical Internal':'External Exam'}:
+                  <strong style={{marginLeft:'0.4rem'}}>
+                    {examType==='INTERNAL' ? (allSubjects.find(s=>String(s.subject_id)===String(marksSubject))?.internal_marks||30)
+                     : examType==='ASSIGNMENT' ? 10
+                     : examType==='PRACTICAL_INTERNAL' ? 20
+                     : (allSubjects.find(s=>String(s.subject_id)===String(marksSubject))?.end_term_marks||70)}
+                  </strong>
+                  {['INTERNAL','ASSIGNMENT','PRACTICAL_INTERNAL'].includes(examType)
+                    ? <span style={{marginLeft:'0.75rem',color:'#276749'}}>✅ Visible to students</span>
+                    : <span style={{marginLeft:'0.75rem',color:'#c53030'}}>🔒 Hidden from students</span>}
+                </div>
+              )}
 
               {classMarks.length > 0 && (
                 <div>
+                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'0.75rem'}}>
+                    <span style={{fontSize:'0.85rem',color:'#718096',fontWeight:'600'}}>{classMarks.length} students loaded</span>
+                    <button style={{...st.saveBtn,margin:0,padding:'0.5rem 1.25rem'}} onClick={submitMarks}>💾 Save All Marks</button>
+                  </div>
                   <table style={st.table}>
-                    <thead><tr>
-                      <th style={st.th}>Roll No</th><th style={st.th}>Name</th><th style={st.th}>Marks</th>
-                    </tr></thead>
-                    <tbody>{classMarks.map((s,i) => (
-                      <tr key={s.student_id}>
-                        <td style={st.td}>{s.roll_no}</td>
-                        <td style={st.td}>{s.name}</td>
-                        <td style={st.td}>
-                          <input type="number" style={{ ...st.input, width:'80px' }} min="0" max="100"
-                            value={s.marks} onChange={e => { const u=[...classMarks]; u[i].marks=e.target.value; setClassMarks(u); }} />
-                        </td>
+                    <thead>
+                      <tr>
+                        <th style={st.th}>Roll No</th>
+                        <th style={st.th}>Student Name</th>
+                        <th style={st.th}>Marks / {
+                          examType==='INTERNAL' ? (allSubjects.find(s=>String(s.subject_id)===String(marksSubject))?.internal_marks||30)
+                          : examType==='ASSIGNMENT' ? 10
+                          : examType==='PRACTICAL_INTERNAL' ? 20
+                          : 70
+                        }</th>
+                        <th style={st.th}>%</th>
                       </tr>
-                    ))}</tbody>
+                    </thead>
+                    <tbody>{classMarks.map((s,i) => {
+                      const maxM = examType==='INTERNAL' ? (allSubjects.find(sub=>String(sub.subject_id)===String(marksSubject))?.internal_marks||30)
+                                 : examType==='ASSIGNMENT' ? 10
+                                 : examType==='PRACTICAL_INTERNAL' ? 20 : 70;
+                      const pct = s.marks !== '' && s.marks !== null ? ((Number(s.marks)/maxM)*100).toFixed(1) : '—';
+                      return (
+                        <tr key={s.student_id} style={{background: s.marks!==''&&s.marks!==null ? '#f0fff4' : '#fff'}}>
+                          <td style={{...st.td,fontFamily:'monospace',fontWeight:'700'}}>{s.roll_no}</td>
+                          <td style={st.td}>{s.name}</td>
+                          <td style={st.td}>
+                            <input type="number" style={{...st.input, width:'90px'}} min="0" max={maxM}
+                              value={s.marks} placeholder="—"
+                              onChange={e => { const u=[...classMarks]; u[i].marks=e.target.value; setClassMarks(u); }} />
+                          </td>
+                          <td style={{...st.td, fontWeight:'600', color: pct>=60?'#276749':pct>=40?'#92400e':'#c53030'}}>
+                            {pct !== '—' ? `${pct}%` : '—'}
+                          </td>
+                        </tr>
+                      );
+                    })}</tbody>
                   </table>
-                  <button style={st.saveBtn} onClick={submitMarks}>💾 Save Marks</button>
+                </div>
+              )}
+              {classMarks.length === 0 && marksSubject && !marksLoading && (
+                <div style={{textAlign:'center',padding:'2rem',color:'#718096'}}>
+                  ⚠️ No enrolled students found for this subject. Make sure students have completed enrollment.
                 </div>
               )}
             </div>
 
+            {/* View Marks */}
             <div style={st.card}>
-              <h3 style={st.cardTitle}>📊 View Marks</h3>
-              <div style={{ display:'grid', gridTemplateColumns:'1fr auto', gap:'12px', marginBottom:'1rem', alignItems:'end' }}>
+              <h3 style={st.cardTitle}>📊 View Class Marks</h3>
+              <div style={{display:'grid', gridTemplateColumns:'1fr auto', gap:'12px', marginBottom:'1rem', alignItems:'end'}}>
                 <div>
                   <label style={st.label}>Subject</label>
-                  <select style={st.select} value={viewMarksSubject} onChange={e => setViewMarksSubject(e.target.value)}>
+                  <select style={st.select} value={viewMarksSubject} onChange={e=>setViewMarksSubject(e.target.value)}>
                     <option value="">Select subject...</option>
-                    {subjects.map(s => <option key={s.assignment_id} value={s.subject_id}>{s.subject_code} — {s.subject_name}</option>)}
+                    {subjects.map(s=><option key={s.assignment_id} value={s.subject_id}>{s.subject_code} — {s.subject_name}</option>)}
                   </select>
                 </div>
-                <button style={st.loadBtn} onClick={loadViewMarks}>Load</button>
+                <button style={st.loadBtn} onClick={loadViewMarks}>🔄 Load</button>
               </div>
-              {viewMarks.length > 0 && (
-                <table style={st.table}>
-                  <thead><tr>
-                    <th style={st.th}>Student</th><th style={st.th}>Exam Type</th><th style={st.th}>Marks</th><th style={st.th}>Max</th>
-                  </tr></thead>
-                  <tbody>{viewMarks.map(m => (
-                    <tr key={m.mark_id}>
-                      <td style={st.td}>{m.student_name}</td>
-                      <td style={st.td}>{m.exam_type}</td>
-                      <td style={st.td}>{m.marks_obtained}</td>
-                      <td style={st.td}>{m.max_marks}</td>
-                    </tr>
-                  ))}</tbody>
-                </table>
-              )}
+
+              {viewMarks.length > 0 && (() => {
+                // Group by student
+                const studentMap = {};
+                viewMarks.forEach(m => {
+                  if (!studentMap[m.student_id]) studentMap[m.student_id] = { name:m.name, roll_no:m.roll_no, marks:{} };
+                  studentMap[m.student_id].marks[m.exam_type] = { obtained: m.marks_obtained, max: m.max_marks };
+                });
+                const examTypes = ['INTERNAL','ASSIGNMENT','PRACTICAL_INTERNAL','EXTERNAL'];
+                const presentTypes = examTypes.filter(t => viewMarks.some(m => m.exam_type === t));
+                return (
+                  <table style={st.table}>
+                    <thead>
+                      <tr>
+                        <th style={st.th}>Roll No</th>
+                        <th style={st.th}>Student</th>
+                        {presentTypes.map(t=>(
+                          <th key={t} style={st.th}>
+                            {t==='INTERNAL'?'Internal':t==='ASSIGNMENT'?'Assignment':t==='PRACTICAL_INTERNAL'?'Practical':t==='EXTERNAL'?'External':t}
+                          </th>
+                        ))}
+                        <th style={st.th}>Total %</th>
+                      </tr>
+                    </thead>
+                    <tbody>{Object.values(studentMap).map((stu,i) => {
+                      let totalObt = 0, totalMax = 0;
+                      presentTypes.forEach(t => {
+                        if (stu.marks[t]) { totalObt += Number(stu.marks[t].obtained); totalMax += Number(stu.marks[t].max); }
+                      });
+                      const totalPct = totalMax > 0 ? ((totalObt/totalMax)*100).toFixed(1) : '—';
+                      return (
+                        <tr key={i} style={{background: i%2===0?'#fff':'#f7fafc'}}>
+                          <td style={{...st.td,fontFamily:'monospace',fontWeight:'700'}}>{stu.roll_no}</td>
+                          <td style={st.td}>{stu.name}</td>
+                          {presentTypes.map(t=>(
+                            <td key={t} style={st.td}>
+                              {stu.marks[t]
+                                ? <span style={{fontWeight:'600'}}>{stu.marks[t].obtained}/{stu.marks[t].max}</span>
+                                : <span style={{color:'#a0aec0'}}>—</span>}
+                            </td>
+                          ))}
+                          <td style={{...st.td, fontWeight:'700', color: totalPct>=60?'#276749':totalPct>=40?'#92400e':'#c53030'}}>
+                            {totalPct !== '—' ? `${totalPct}%` : '—'}
+                          </td>
+                        </tr>
+                      );
+                    })}</tbody>
+                  </table>
+                );
+              })()}
             </div>
           </div>
         )}
