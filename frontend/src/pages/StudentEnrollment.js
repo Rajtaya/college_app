@@ -28,7 +28,9 @@ const categoryColors = {
 const FIXED_CATEGORIES = new Set(['SEMINAR', 'INTERNSHIP']);
 
 export default function StudentEnrollment({ student, onBack }) {
-  const isPG = student.level_id === 2;
+  const isPG = Number(student.level_id) === 2
+    || student.level_name === 'PG'
+    || String(student.course || '').toUpperCase().startsWith('M.');
 
   const [subjects, setSubjects]                 = useState([]);
   const [enrollments, setEnrollments]           = useState({});
@@ -85,7 +87,7 @@ export default function StudentEnrollment({ student, onBack }) {
         API.get(`/enrollment/status/${student.student_id}`)
       ]);
       setSubjects(subRes.data);
-      const hasSubmitted = enrollRes.data.some(e => e.status !== 'PENDING');
+      const hasSubmitted = enrollRes.data.some(e => e.is_draft === 0 && e.status !== 'PENDING');
       setSubmitted(hasSubmitted);
 
       const enrollState = {};
@@ -160,13 +162,42 @@ export default function StudentEnrollment({ student, onBack }) {
         if (pair) updated[pair.subject_id] = { ...prev[pair.subject_id], status: newStatus };
       }
 
-      // Auto-reject others in single-select categories
+      // Auto-reject others in single-select categories (exclude T/P pair for SEC/MDC)
       if (['MIC', 'VAC', 'AEC', 'SEC', 'OEC', 'ELECTIVE'].includes(sub.category) && newStatus === 'ACCEPTED') {
         subjects.forEach(s => {
           if (s.subject_id !== subject_id && s.category === sub.category) {
-            updated[s.subject_id] = { ...prev[s.subject_id], status: 'REJECTED' };
+            // Don't reject the T/P pair partner
+            const isPairPartner = sub.pair_code && s.subject_code.trim() === sub.pair_code.trim();
+            if (!isPairPartner) {
+              updated[s.subject_id] = { ...updated[s.subject_id], status: 'REJECTED' };
+            }
           }
         });
+      }
+
+      // DEC auto-reject: when 4 DEC accepted, reject all remaining pending DEC subjects
+      if (['ELECTIVE_FINANCE','ELECTIVE_HR','ELECTIVE_MARKETING'].includes(sub.category) && newStatus === 'ACCEPTED') {
+        const DEC_CATS = ['ELECTIVE_FINANCE','ELECTIVE_HR','ELECTIVE_MARKETING'];
+        const acceptedDEC = subjects.filter(s =>
+          DEC_CATS.includes(s.category) &&
+          (updated[s.subject_id]?.status === 'ACCEPTED')
+        ).length;
+        if (acceptedDEC >= 4) {
+          // Validate combination before auto-rejecting
+          const fin = subjects.filter(s => s.category === 'ELECTIVE_FINANCE' && updated[s.subject_id]?.status === 'ACCEPTED').length;
+          const hr  = subjects.filter(s => s.category === 'ELECTIVE_HR'      && updated[s.subject_id]?.status === 'ACCEPTED').length;
+          const mkt = subjects.filter(s => s.category === 'ELECTIVE_MARKETING'&& updated[s.subject_id]?.status === 'ACCEPTED').length;
+          const groups = [fin, hr, mkt].filter(n => n > 0);
+          const isCore  = groups.length === 1 && groups[0] === 4;
+          const isMixed = groups.length === 2 && groups.every(n => n === 2);
+          if (isCore || isMixed) {
+            subjects.forEach(s => {
+              if (DEC_CATS.includes(s.category) && updated[s.subject_id]?.status === 'PENDING') {
+                updated[s.subject_id] = { ...updated[s.subject_id], status: 'REJECTED' };
+              }
+            });
+          }
+        }
       }
 
       // Auto-reject other MDC groups
@@ -303,9 +334,20 @@ export default function StudentEnrollment({ student, onBack }) {
       }
     }
 
-    const pending = subjects.filter(s =>
-      !isFixedSubject(s.category) && prev[s.subject_id]?.status === 'PENDING'
+    // For DEC subjects, only count as pending if valid 4-combo already selected
+    const DEC_CATS = new Set(['ELECTIVE_FINANCE','ELECTIVE_HR','ELECTIVE_MARKETING']);
+    const decTotal2 = fin.length + hr.length + mkt.length;
+    const decGroups2 = [fin.length, hr.length, mkt.length].filter(n => n > 0);
+    const decDone = decTotal2 === 4 && (
+      (decGroups2.length === 1 && decGroups2[0] === 4) ||
+      (decGroups2.length === 2 && decGroups2.every(n => n === 2))
     );
+
+    const pending = subjects.filter(s => {
+      if (isFixedSubject(s.category)) return false;
+      if (DEC_CATS.has(s.category) && decDone) return false;
+      return prev[s.subject_id]?.status === 'PENDING';
+    });
     if (pending.length > 0) errors.push(`❌ ${pending.length} subject(s) still pending`);
 
     return errors;

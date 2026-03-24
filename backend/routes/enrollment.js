@@ -215,21 +215,36 @@ router.post('/submit/:student_id', verify('student', 'admin'), async (req, res) 
     const scheme = student.scheme || 'A';
     const sem    = student.semester;
 
-    // Block re-submission
+    // Block re-submission — only block if finalized (non-draft) records exist
     const [existing] = await db.query(
-      'SELECT COUNT(*) AS count FROM student_subject_enrollment WHERE student_id = ?',
+      'SELECT COUNT(*) AS count FROM student_subject_enrollment WHERE student_id = ? AND is_draft = 0',
       [req.params.student_id]
     );
     if (existing[0].count > 0) {
       return res.status(400).json({ error: 'Already submitted. Contact admin to reset.' });
     }
 
-    // Reject if any subjects still pending
-    const pending = enrollments.filter(e => e.status === 'PENDING');
-    if (pending.length > 0) {
+    // Load full details for ALL subjects to check categories (including pending DEC)
+    const DEC_CATS = new Set(['ELECTIVE_FINANCE','ELECTIVE_HR','ELECTIVE_MARKETING']);
+    const allSubjectIds = enrollments.map(e => e.subject_id);
+    let allSubjectMeta = [];
+    if (allSubjectIds.length > 0) {
+      const [metaRows] = await db.query(
+        'SELECT subject_id, category FROM subjects WHERE subject_id IN (?)',
+        [allSubjectIds]
+      );
+      allSubjectMeta = metaRows;
+    }
+    // Only non-DEC pending subjects block submission
+    const nonDECPending = enrollments.filter(e => {
+      if (e.status !== 'PENDING') return false;
+      const meta = allSubjectMeta.find(s => s.subject_id === e.subject_id);
+      return !meta || !DEC_CATS.has(meta.category);
+    });
+    if (nonDECPending.length > 0) {
       return res.status(400).json({
-        error: `${pending.length} subject(s) still pending — please Accept or Raise Error for all`,
-        errors: [`${pending.length} subject(s) still pending`]
+        error: `${nonDECPending.length} subject(s) still pending — please Accept or Raise Error for all`,
+        errors: [`${nonDECPending.length} subject(s) still pending`]
       });
     }
 
@@ -271,10 +286,12 @@ router.post('/submit/:student_id', verify('student', 'admin'), async (req, res) 
       if (rejectedFixed.length > 0)
         errors.push('❌ DSC, Seminar and Internship subjects are compulsory and cannot be rejected');
 
-      // VAC: exactly 1
+      // VAC: exactly 1 — only validate if VAC subjects exist for this semester
       const vac = byCategory['VAC'] || [];
-      if (vac.length === 0) errors.push('❌ VAC: Must select exactly 1 subject');
-      else if (vac.length > 1) errors.push(`❌ VAC: Select only 1 (selected ${vac.length})`);
+      if (subjectDetails.some(s => s.category === 'VAC')) {
+        if (vac.length === 0) errors.push('❌ VAC: Must select exactly 1 subject');
+        else if (vac.length > 1) errors.push(`❌ VAC: Select only 1 (selected ${vac.length})`);
+      }
 
       // ELECTIVE Sem 2: exactly 1
       const elective = byCategory['ELECTIVE'] || [];
@@ -481,9 +498,10 @@ router.post('/submit/:student_id', verify('student', 'admin'), async (req, res) 
     }
 
     // ── Save ──────────────────────────────────────────────────────────────────
+    // Delete all draft records (both PENDING and ACCEPTED drafts) before final save
     await db.query(
-      'DELETE FROM student_subject_enrollment WHERE student_id = ? AND status = ?',
-      [req.params.student_id, 'PENDING']
+      'DELETE FROM student_subject_enrollment WHERE student_id = ? AND is_draft = 1',
+      [req.params.student_id]
     );
 
     for (const e of enrollments) {
@@ -499,6 +517,9 @@ router.post('/submit/:student_id', verify('student', 'admin'), async (req, res) 
         [req.params.student_id, e.subject_id, e.status, e.is_major || false, e.remarks || '']
       );
     }
+
+    // Mark student enrollment as submitted
+    await db.query('UPDATE students SET enrollment_submitted = 1 WHERE student_id = ?', [req.params.student_id]);
 
     res.json({ message: 'Enrollment submitted successfully!' });
   } catch (err) { res.status(500).json({ error: err.message }); }

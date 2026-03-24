@@ -10,7 +10,15 @@ router.post('/student/login', async (req, res) => {
   if (!roll_no || !password)
     return res.status(400).json({ error: 'Roll number and password are required' });
   try {
-    const [rows] = await db.query('SELECT * FROM students WHERE roll_no = ?', [roll_no]);
+    const [rows] = await db.query(
+      `SELECT s.*, l.level_name, p.programme_name, f.faculty_name
+       FROM students s
+       LEFT JOIN levels l ON s.level_id = l.level_id
+       LEFT JOIN programmes p ON s.programme_id = p.programme_id
+       LEFT JOIN faculties f ON s.faculty_id = f.faculty_id
+       WHERE s.roll_no = ?`,
+      [roll_no]
+    );
     if (!rows.length) return res.status(401).json({ error: 'Invalid credentials' });
     const valid = await bcrypt.compare(password, rows[0].password);
     if (!valid) return res.status(401).json({ error: 'Invalid credentials' });

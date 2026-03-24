@@ -46,7 +46,9 @@ export default function Dashboard({ student, onLogout }) {
   const totalPresent = attendance.filter(a => a.status==='PRESENT').length;
   const overallPct = totalClasses ? ((totalPresent/totalClasses)*100).toFixed(1) : 0;
 
-  const isEnrollmentSubmitted = student.enrollment_submitted === 1;
+  // Derive from live API data — don't trust stale localStorage student object
+  const isEnrollmentSubmitted = student.enrollment_submitted === 1
+    || (enrollmentSummary && enrollmentSummary.some(e => e.is_draft === 0 && e.status !== 'PENDING'));
   const acceptedSubjects = enrollmentSummary 
     ? enrollmentSummary.filter(e => e.status === 'ACCEPTED' && e.is_draft === 0) 
     : [];
@@ -58,14 +60,46 @@ export default function Dashboard({ student, onLogout }) {
     return <StudentEnrollment student={student} onBack={() => { setShowEnrollment(false); fetchEnrollmentSummary(); }} />;
   }
 
+  // Detect PG — level_id may come as string or number depending on session age
+  const PG_ONLY_CATEGORIES = new Set(['ELECTIVE','ELECTIVE_FINANCE','ELECTIVE_HR','ELECTIVE_MARKETING','OEC','SEMINAR','INTERNSHIP']);
+  const isPG = Number(student.level_id) === 2
+    || student.level_name === 'PG'
+    || String(student.course || '').toUpperCase().startsWith('M.')
+    || (enrollmentSummary && enrollmentSummary.some(e => PG_ONLY_CATEGORIES.has(e.category)));
+
   const categoryLabels = {
-    MAJOR:'Discipline Specific', MIC:'Minor/Vocational', MDC:'Multidisciplinary',
-    SEC:'Skill Enhancement', VAC:'Value Added', AEC:'Ability Enhancement'
+    // UG NEP 2020
+    MAJOR:               'Discipline Specific Course (DSC)',
+    MIC:                 'Minor Course / Vocational',
+    MDC:                 'Multidisciplinary Course',
+    SEC:                 'Skill Enhancement Course',
+    VAC:                 'Value Added Course',
+    AEC:                 'Ability Enhancement Course',
+    // PG
+    ELECTIVE:            'Discipline Elective Course',
+    ELECTIVE_FINANCE:    'Discipline Elective — Finance',
+    ELECTIVE_HR:         'Discipline Elective — Human Resource',
+    ELECTIVE_MARKETING:  'Discipline Elective — Marketing',
+    OEC:                 'Open Elective Course',
+    SEMINAR:             'Seminar',
+    INTERNSHIP:          'Internship',
   };
   const categoryColors = {
+    // UG
     MAJOR:'#4c51bf', MIC:'#057a55', MDC:'#dd6b20',
-    SEC:'#e53e3e', VAC:'#d69e2e', AEC:'#805ad5'
+    SEC:'#e53e3e', VAC:'#d69e2e', AEC:'#805ad5',
+    // PG
+    ELECTIVE:'#2b6cb0', ELECTIVE_FINANCE:'#276749',
+    ELECTIVE_HR:'#702459', ELECTIVE_MARKETING:'#744210',
+    OEC:'#1a365d', SEMINAR:'#553c9a', INTERNSHIP:'#234e52',
   };
+
+  // Ordered display: UG order first, then PG, then any unknown
+  const CATEGORY_ORDER = [
+    'MAJOR','MIC','MDC','SEC','VAC','AEC',
+    'ELECTIVE','ELECTIVE_FINANCE','ELECTIVE_HR','ELECTIVE_MARKETING',
+    'OEC','SEMINAR','INTERNSHIP',
+  ];
 
   const groupedAccepted = acceptedSubjects.reduce((acc, s) => {
     if (!acc[s.category]) acc[s.category] = [];
@@ -196,7 +230,10 @@ export default function Dashboard({ student, onLogout }) {
                   </div>
                 </div>
 
-                {Object.keys(categoryLabels).filter(cat => groupedAccepted[cat]).map(category => (
+                {[
+                  ...CATEGORY_ORDER,
+                  ...Object.keys(groupedAccepted).filter(c => !CATEGORY_ORDER.includes(c))
+                ].filter(cat => groupedAccepted[cat]).map(category => (
                   <div key={category} style={styles.categoryBlock}>
                     <div style={{...styles.categoryHeader, background: categoryColors[category]||'#667eea'}}>
                       <span style={styles.catTitle}>{categoryLabels[category] || category}</span>
@@ -205,7 +242,9 @@ export default function Dashboard({ student, onLogout }) {
                     <table style={styles.table}>
                       <thead>
                         <tr>
-                          {['Course Code','Paper Name','Discipline','Credits','Internal Marks', category==='MAJOR'?'Major?':''].filter(Boolean).map(h=>(
+                          {['Course Code','Paper Name','Discipline','Credits','Internal Marks',
+                            (!isPG && category === 'MAJOR') ? 'Major?' : ''
+                          ].filter(Boolean).map(h=>(
                             <th key={h} style={styles.th}>{h}</th>
                           ))}
                         </tr>
@@ -225,7 +264,7 @@ export default function Dashboard({ student, onLogout }) {
                             </td>
                             <td style={{...styles.td, textAlign:'center'}}>{sub.credits}</td>
                             <td style={{...styles.td, textAlign:'center'}}>{sub.internal_marks}</td>
-                            {category === 'MAJOR' && (
+                            {!isPG && category === 'MAJOR' && (
                               <td style={{...styles.td, textAlign:'center'}}>
                                 {sub.is_major ? <span style={{color:'#4c51bf', fontWeight:'700'}}>⭐ Major</span> : '-'}
                               </td>
