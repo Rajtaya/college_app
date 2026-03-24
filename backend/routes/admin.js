@@ -236,6 +236,25 @@ router.get('/attendance/summary', async (req, res) => {
   } catch (err) { console.error(err); res.status(500).json({ error: 'Internal server error' }); }
 });
 
+// GET /admin/fees/export — Full fee export
+router.get('/fees/export', async (req, res) => {
+  try {
+    const [rows] = await db.query(`
+      SELECT
+        f.fee_id, st.roll_no, st.name as student_name,
+        p.programme_name, l.level_name, st.semester,
+        f.fee_type, f.amount, f.due_date, f.paid_date,
+        f.status, f.transaction_ref
+      FROM fees f
+      JOIN students st ON f.student_id = st.student_id
+      LEFT JOIN programmes p ON st.programme_id = p.programme_id
+      LEFT JOIN levels l ON st.level_id = l.level_id
+      ORDER BY p.programme_name, st.roll_no, f.due_date`
+    );
+    res.json(rows);
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Internal server error' }); }
+});
+
 router.get('/fees', async (req, res) => {
   try {
     const [rows] = await db.query(
