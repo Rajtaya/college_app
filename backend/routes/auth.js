@@ -3,12 +3,21 @@ const router  = express.Router();
 const db      = require('../db');
 const bcrypt  = require('bcryptjs');
 const jwt     = require('jsonwebtoken');
+const { body, validationResult } = require('express-validator');
 require('dotenv').config();
 
-router.post('/student/login', async (req, res) => {
+const validate = (req, res, next) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) return res.status(400).json({ error: errors.array()[0].msg });
+  next();
+};
+
+router.post('/student/login',
+  body('roll_no').trim().notEmpty().withMessage('Roll number is required'),
+  body('password').notEmpty().withMessage('Password is required'),
+  validate,
+  async (req, res) => {
   const { roll_no, password } = req.body;
-  if (!roll_no || !password)
-    return res.status(400).json({ error: 'Roll number and password are required' });
   try {
     const [rows] = await db.query(
       `SELECT s.*, l.level_name, p.programme_name, f.faculty_name
@@ -41,10 +50,12 @@ router.post('/student/login', async (req, res) => {
   }
 });
 
-router.post('/teacher/login', async (req, res) => {
+router.post('/teacher/login',
+  body('email').trim().isEmail().withMessage('Valid email is required').normalizeEmail(),
+  body('password').notEmpty().withMessage('Password is required'),
+  validate,
+  async (req, res) => {
   const { email, password } = req.body;
-  if (!email || !password)
-    return res.status(400).json({ error: 'Email and password are required' });
   try {
     const [rows] = await db.query(
       `SELECT t.*, 

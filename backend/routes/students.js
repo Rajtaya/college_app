@@ -3,11 +3,17 @@ const router  = express.Router();
 const db      = require('../db');
 const bcrypt  = require('bcryptjs');
 const { verify } = require('../middleware/auth');
+const { body, validationResult } = require('express-validator');
+
+const validate = (req, res, next) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) return res.status(400).json({ error: errors.array()[0].msg });
+  next();
+};
 
 router.use((req, res, next) => {
-  // Profile update & profile view allowed for students too
-  if (req.method === 'PUT'  && req.path.includes('/profile')) return next();
-  if (req.method === 'GET'  && req.path.includes('/profile')) return next();
+  // Profile routes: any valid JWT (students access own profile only — enforced at route level)
+  if (req.path.includes('/profile')) return verify()(req, res, next);
   verify('admin', 'teacher')(req, res, next);
 });
 
@@ -64,6 +70,9 @@ router.get('/:id', async (req, res) => {
 
 // ── GET /:id/profile — Full profile using view ──────────────────────────────
 router.get('/:id/profile', async (req, res) => {
+  if (req.user.role === 'student' && req.user.id !== parseInt(req.params.id)) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
   try {
     const [rows] = await db.query(
       'SELECT * FROM vw_student_profile WHERE student_id = ?',
@@ -75,7 +84,16 @@ router.get('/:id/profile', async (req, res) => {
 });
 
 // ── POST / — Add a student (admin only) ────────────────────────────────────
-router.post('/', verify('admin'), async (req, res) => {
+router.post('/',
+  verify('admin'),
+  body('roll_no').trim().notEmpty().withMessage('Roll number is required'),
+  body('first_name').trim().notEmpty().withMessage('First name is required'),
+  body('last_name').trim().notEmpty().withMessage('Last name is required'),
+  body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters'),
+  body('email').optional({ checkFalsy: true }).isEmail().withMessage('Invalid email format').normalizeEmail(),
+  body('semester').optional().isInt({ min: 1, max: 8 }).withMessage('Semester must be between 1 and 8'),
+  validate,
+  async (req, res) => {
   const {
     roll_no, first_name, last_name, email, phone,
     semester, study_year, password,
@@ -100,7 +118,14 @@ router.post('/', verify('admin'), async (req, res) => {
 });
 
 // ── PUT /:id/profile — Student updates their own profile / password ─────────
-router.put('/:id/profile', async (req, res) => {
+router.put('/:id/profile',
+  body('email').optional({ checkFalsy: true }).isEmail().withMessage('Invalid email format').normalizeEmail(),
+  body('new_password').optional({ checkFalsy: true }).isLength({ min: 6 }).withMessage('New password must be at least 6 characters'),
+  validate,
+  async (req, res) => {
+  if (req.user.role === 'student' && req.user.id !== parseInt(req.params.id)) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
   const { name, first_name, last_name, email, phone, current_password, new_password } = req.body;
   try {
     const [rows] = await db.query(

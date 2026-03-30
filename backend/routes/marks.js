@@ -5,6 +5,13 @@ const { verify } = require('../middleware/auth');
 
 router.use(verify());
 
+const ownOrStaff = (req, res, next) => {
+  if (req.user.role === 'student' && req.user.id !== parseInt(req.params.student_id)) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  next();
+};
+
 // Visibility rules — which exam types are visible to students
 const STUDENT_VISIBLE = new Set(['INTERNAL','ASSIGNMENT','PRACTICAL_INTERNAL']);
 
@@ -49,7 +56,7 @@ router.post('/bulk', verify('teacher', 'admin'), async (req, res) => {
 });
 
 // GET /student/:student_id — Marks visible to student only
-router.get('/student/:student_id', async (req, res) => {
+router.get('/student/:student_id', ownOrStaff, async (req, res) => {
   try {
     const [rows] = await db.query(
       `SELECT m.*, s.subject_name, s.subject_code, s.category, s.credits
@@ -66,7 +73,7 @@ router.get('/student/:student_id', async (req, res) => {
 });
 
 // GET /student/:student_id/all — All marks including external (admin/teacher view)
-router.get('/student/:student_id/all', async (req, res) => {
+router.get('/student/:student_id/all', verify('teacher', 'admin'), async (req, res) => {
   try {
     const [rows] = await db.query(
       `SELECT m.*, s.subject_name, s.subject_code, s.category, s.credits
@@ -83,7 +90,7 @@ router.get('/student/:student_id/all', async (req, res) => {
 });
 
 // GET /student/:student_id/summary — Marks summary per subject
-router.get('/student/:student_id/summary', async (req, res) => {
+router.get('/student/:student_id/summary', ownOrStaff, async (req, res) => {
   try {
     const [rows] = await db.query(
       `SELECT s.subject_id, s.subject_name, s.subject_code,
@@ -120,7 +127,7 @@ router.get('/subject/:subject_id', async (req, res) => {
 });
 
 // GET /student/:student_id/detailed — Marks with percentage + PASS/FAIL per subject
-router.get('/student/:student_id/detailed', async (req, res) => {
+router.get('/student/:student_id/detailed', ownOrStaff, async (req, res) => {
   try {
     const { semester, academic_year_id } = req.query;
     let query = 'SELECT * FROM vw_student_marks_summary WHERE student_id = ? AND is_visible_to_student = 1';

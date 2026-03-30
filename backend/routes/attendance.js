@@ -5,6 +5,13 @@ const { verify } = require('../middleware/auth');
 
 router.use(verify());
 
+const ownOrStaff = (req, res, next) => {
+  if (req.user.role === 'student' && req.user.id !== parseInt(req.params.student_id)) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  next();
+};
+
 // POST / — Mark single attendance (upsert)
 router.post('/', verify('teacher', 'admin'), async (req, res) => {
   const { student_id, subject_id, date, status } = req.body;
@@ -39,7 +46,7 @@ router.post('/bulk', verify('teacher', 'admin'), async (req, res) => {
 });
 
 // GET /student/:student_id — All attendance for a student
-router.get('/student/:student_id', async (req, res) => {
+router.get('/student/:student_id', ownOrStaff, async (req, res) => {
   try {
     const [rows] = await db.query(
       `SELECT a.*, s.subject_name, s.subject_code
@@ -56,7 +63,7 @@ router.get('/student/:student_id', async (req, res) => {
 });
 
 // GET /student/:student_id/summary — Attendance % per subject
-router.get('/student/:student_id/summary', async (req, res) => {
+router.get('/student/:student_id/summary', ownOrStaff, async (req, res) => {
   try {
     const [rows] = await db.query(
       `SELECT s.subject_id, s.subject_name, s.subject_code,
@@ -95,7 +102,7 @@ router.get('/subject/:subject_id/date/:date', async (req, res) => {
 });
 
 // GET /student/:student_id/detailed — Attendance summary using view (includes LEAVE + defaulter status)
-router.get('/student/:student_id/detailed', async (req, res) => {
+router.get('/student/:student_id/detailed', ownOrStaff, async (req, res) => {
   try {
     const { semester, academic_year_id } = req.query;
     let query = 'SELECT * FROM vw_student_attendance_summary WHERE student_id = ?';

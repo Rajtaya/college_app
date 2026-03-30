@@ -40,8 +40,8 @@ app.use('/api/enrollment',  require('./routes/enrollment'));
 app.use('/api/disciplines', require('./routes/disciplines'));
 
 app.use((err, req, res, next) => {
-  console.error(err);
-  console.error("GLOBAL ERROR:", err.message, err.stack); res.status(500).json({ error: err.message });
+  console.error("GLOBAL ERROR:", err.message, err.stack);
+  res.status(500).json({ error: 'Internal server error' });
 });
 
 app.listen(process.env.PORT || 3000, () => {

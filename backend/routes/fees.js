@@ -5,8 +5,15 @@ const { verify } = require('../middleware/auth');
 
 router.use(verify());
 
+const ownOrAdmin = (req, res, next) => {
+  if (req.user.role === 'student' && req.user.id !== parseInt(req.params.student_id)) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  next();
+};
+
 // ── GET /student/:student_id — All fees for a student ──────────────────────
-router.get('/student/:student_id', async (req, res) => {
+router.get('/student/:student_id', ownOrAdmin, async (req, res) => {
   try {
     const [rows] = await db.query(
       'SELECT * FROM fees WHERE student_id = ? ORDER BY due_date DESC',
@@ -17,7 +24,7 @@ router.get('/student/:student_id', async (req, res) => {
 });
 
 // ── GET /student/:student_id/summary — Fee summary (total, paid, pending) ──
-router.get('/student/:student_id/summary', async (req, res) => {
+router.get('/student/:student_id/summary', ownOrAdmin, async (req, res) => {
   try {
     const [rows] = await db.query(
       `SELECT
@@ -34,7 +41,7 @@ router.get('/student/:student_id/summary', async (req, res) => {
 });
 
 // ── GET /student/:student_id/status — Detailed fee status using view ────────
-router.get('/student/:student_id/status', async (req, res) => {
+router.get('/student/:student_id/status', ownOrAdmin, async (req, res) => {
   try {
     const [rows] = await db.query(
       `SELECT * FROM vw_fee_status_report

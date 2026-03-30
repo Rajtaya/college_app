@@ -4,15 +4,26 @@ const db = require('../db');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { verify } = require('../middleware/auth');
+const { body, validationResult } = require('express-validator');
 require('dotenv').config();
 
-router.post('/login', async (req, res) => {
+const validate = (req, res, next) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) return res.status(400).json({ error: errors.array()[0].msg });
+  next();
+};
+
+router.post('/login',
+  body('email').trim().isEmail().withMessage('Valid email is required').normalizeEmail(),
+  body('password').notEmpty().withMessage('Password is required'),
+  validate,
+  async (req, res) => {
   const { email, password } = req.body;
   try {
     const [rows] = await db.query('SELECT * FROM admins WHERE email = ?', [email]);
-    if (!rows.length) return res.status(404).json({ error: 'Admin not found' });
+    if (!rows.length) return res.status(401).json({ error: 'Invalid credentials' });
     const valid = await bcrypt.compare(password, rows[0].password);
-    if (!valid) return res.status(401).json({ error: 'Invalid password' });
+    if (!valid) return res.status(401).json({ error: 'Invalid credentials' });
     const token = jwt.sign({ id: rows[0].admin_id, role: 'admin' }, process.env.JWT_SECRET, { expiresIn: '1d' });
     res.json({ token, admin: { admin_id: rows[0].admin_id, name: rows[0].name, email: rows[0].email } });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Internal server error' }); }
@@ -59,7 +70,12 @@ router.get('/teachers', async (req, res) => {
   } catch (err) { console.error(err); res.status(500).json({ error: 'Internal server error' }); }
 });
 
-router.post('/teachers', async (req, res) => {
+router.post('/teachers',
+  body('first_name').trim().notEmpty().withMessage('First name is required'),
+  body('email').trim().isEmail().withMessage('Valid email is required').normalizeEmail(),
+  body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters'),
+  validate,
+  async (req, res) => {
   const { first_name, last_name, email, phone, password, discipline_ids } = req.body;
   try {
     const hashed = await bcrypt.hash(password, 12);
