@@ -571,7 +571,7 @@ router.put('/enrollment/bulkupdate/:student_id', async (req, res) => {
       if (existing.length) {
         await db.query('UPDATE student_subject_enrollment SET status = ?, admin_modified = 1, admin_note = ? WHERE student_id = ? AND subject_id = ?', [change.status, admin_note || '', req.params.student_id, change.subject_id]);
       } else {
-        await db.query('INSERT INTO student_subject_enrollment (student_id, subject_id, status, admin_modified, admin_note) VALUES (?, ?, ?, 1, ?)', [req.params.student_id, change.subject_id, change.status, admin_note || 'Added by admin']);
+        await db.query('INSERT INTO student_subject_enrollment (student_id, subject_id, status, admin_modified, admin_note, is_draft) VALUES (?, ?, ?, 1, ?, 0)', [req.params.student_id, change.subject_id, change.status, admin_note || 'Added by admin']);
       }
     }
     res.json({ message: `${changes.length} subject(s) updated successfully` });
