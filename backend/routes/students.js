@@ -1,53 +1,138 @@
 const express = require('express');
-const router = express.Router();
-const db = require('../db');
-const bcrypt = require('bcryptjs');
+const router  = express.Router();
+const db      = require('../db');
+const bcrypt  = require('bcryptjs');
 const { verify } = require('../middleware/auth');
 
-router.use(verify('admin', 'teacher'));
+router.use((req, res, next) => {
+  // Profile update & profile view allowed for students too
+  if (req.method === 'PUT'  && req.path.includes('/profile')) return next();
+  if (req.method === 'GET'  && req.path.includes('/profile')) return next();
+  verify('admin', 'teacher')(req, res, next);
+});
 
-// Get all students
+// ── GET / — All students ────────────────────────────────────────────────────
 router.get('/', async (req, res) => {
   try {
     const [rows] = await db.query(
-      `SELECT s.student_id, s.roll_no, s.name, s.email, s.phone, s.course,
-              s.semester, s.year, s.level_id, s.programme_id,
-              l.level_name, p.programme_name
+      `SELECT s.student_id, s.roll_no,
+              CONCAT(s.first_name, ' ', s.last_name) AS name,
+              s.first_name, s.last_name,
+              s.email, s.phone, s.abc_id,
+              s.semester, s.study_year,
+              s.level_id, s.programme_id, s.faculty_id,
+              s.enrollment_submitted, s.academic_year_id,
+              l.level_name, p.programme_name, f.faculty_name,
+              a.year_label AS academic_year
        FROM students s
-       LEFT JOIN levels l ON s.level_id = l.level_id
-       LEFT JOIN programmes p ON s.programme_id = p.programme_id`
+       LEFT JOIN levels        l ON s.level_id        = l.level_id
+       LEFT JOIN programmes    p ON s.programme_id    = p.programme_id
+       LEFT JOIN faculties     f ON s.faculty_id      = f.faculty_id
+       LEFT JOIN academic_years a ON s.academic_year_id = a.academic_year_id
+       ORDER BY s.roll_no`
     );
     res.json(rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Add a student
-router.post('/', verify('admin'), async (req, res) => {
-  const { roll_no, name, email, phone, course, semester, year, password, level_id, programme_id } = req.body;
+// ── GET /:id — Single student by ID ────────────────────────────────────────
+router.get('/:id', async (req, res) => {
   try {
-    const hashed = await bcrypt.hash(password, 10);
+    const [rows] = await db.query(
+      `SELECT s.student_id, s.roll_no,
+              CONCAT(s.first_name, ' ', s.last_name) AS name,
+              s.first_name, s.last_name,
+              s.email, s.phone, s.abc_id,
+              s.semester, s.study_year,
+              s.level_id, s.programme_id, s.faculty_id,
+              s.enrollment_submitted, s.academic_year_id,
+              l.level_name, p.programme_name, f.faculty_name,
+              a.year_label AS academic_year
+       FROM students s
+       LEFT JOIN levels        l ON s.level_id        = l.level_id
+       LEFT JOIN programmes    p ON s.programme_id    = p.programme_id
+       LEFT JOIN faculties     f ON s.faculty_id      = f.faculty_id
+       LEFT JOIN academic_years a ON s.academic_year_id = a.academic_year_id
+       WHERE s.student_id = ?`,
+      [req.params.id]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Student not found' });
+    const { password, ...student } = rows[0];
+    res.json(student);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── GET /:id/profile — Full profile using view ──────────────────────────────
+router.get('/:id/profile', async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      'SELECT * FROM vw_student_profile WHERE student_id = ?',
+      [req.params.id]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Student not found' });
+    res.json(rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── POST / — Add a student (admin only) ────────────────────────────────────
+router.post('/', verify('admin'), async (req, res) => {
+  const {
+    roll_no, first_name, last_name, email, phone,
+    semester, study_year, password,
+    level_id, programme_id, faculty_id, academic_year_id, abc_id
+  } = req.body;
+  try {
+    const hashed   = await bcrypt.hash(password, 10);
+    const emailVal = email && email.trim() ? email.trim() : null;
     const [result] = await db.query(
-      'INSERT INTO students (roll_no, name, email, phone, course, semester, year, password, level_id, programme_id) VALUES (?,?,?,?,?,?,?,?,?,?)',
-      [roll_no, name, email, phone, course, semester, year, hashed, level_id || null, programme_id || null]
+      `INSERT INTO students
+         (roll_no, first_name, last_name, email, phone,
+          semester, study_year, password,
+          level_id, programme_id, faculty_id, academic_year_id, abc_id)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      [roll_no, first_name, last_name, emailVal, phone || null,
+       semester, study_year || 1, hashed,
+       level_id || null, programme_id || null, faculty_id || null,
+       academic_year_id || null, abc_id || null]
     );
     res.json({ message: 'Student added', student_id: result.insertId });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Get single student
-router.get('/:id', async (req, res) => {
+// ── PUT /:id/profile — Student updates their own profile / password ─────────
+router.put('/:id/profile', async (req, res) => {
+  const { name, first_name, last_name, email, phone, current_password, new_password } = req.body;
   try {
     const [rows] = await db.query(
-      `SELECT s.student_id, s.roll_no, s.name, s.email, s.phone, s.course,
-              s.semester, s.year, l.level_name, p.programme_name
-       FROM students s
-       LEFT JOIN levels l ON s.level_id = l.level_id
-       LEFT JOIN programmes p ON s.programme_id = p.programme_id
-       WHERE s.student_id = ?`,
-      [req.params.id]
+      'SELECT * FROM students WHERE student_id = ?', [req.params.id]
     );
     if (!rows.length) return res.status(404).json({ error: 'Student not found' });
-    res.json(rows[0]);
+    const student = rows[0];
+
+    // Resolve first/last name — support both split fields and legacy single name
+    let fName = first_name || (name ? name.split(' ')[0] : student.first_name);
+    let lName = last_name  || (name ? name.split(' ').slice(1).join(' ') : student.last_name);
+
+    if (new_password) {
+      // Password change — verify current password first
+      const valid = await bcrypt.compare(current_password || '', student.password);
+      if (!valid) return res.status(401).json({ error: 'Current password is incorrect' });
+      const hashed = await bcrypt.hash(new_password, 10);
+      await db.query(
+        `UPDATE students
+         SET first_name=?, last_name=?, email=?, phone=?, password=?
+         WHERE student_id=?`,
+        [fName, lName, email || student.email, phone || student.phone, hashed, req.params.id]
+      );
+    } else {
+      await db.query(
+        `UPDATE students
+         SET first_name=?, last_name=?, email=?, phone=?
+         WHERE student_id=?`,
+        [fName, lName, email || student.email, phone || student.phone, req.params.id]
+      );
+    }
+    res.json({ message: 'Profile updated successfully' });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

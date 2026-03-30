@@ -65,7 +65,7 @@ const PG_FIXED = new Set(['MAJOR', 'SEMINAR', 'INTERNSHIP']);
 router.get('/students/:subject_id', verify('teacher', 'admin'), async (req, res) => {
   try {
     const [rows] = await db.query(
-      `SELECT s.student_id, s.name, s.roll_no
+      `SELECT s.student_id, CONCAT(s.first_name, ' ', s.last_name) AS name, s.roll_no
        FROM student_subject_enrollment e
        JOIN students s ON e.student_id = s.student_id
        WHERE e.subject_id = ? AND e.status = 'ACCEPTED'
@@ -86,10 +86,30 @@ router.get('/subjects/:student_id', async (req, res) => {
     const isPG   = student.level_name === 'PG';
     const scheme = student.scheme || 'A';
 
-    // For Scheme A/B — fetch student's assigned disciplines
-    let disciplineIds = [];
-    if (!isPG && ['A', 'B'].includes(scheme)) {
-      disciplineIds = await getStudentDisciplines(req.params.student_id);
+    // Get discipline IDs from student's ACCEPTED MAJOR subjects
+    // This is used to EXCLUDE from MDC/MIC (student cannot pick same discipline as their major)
+    let majorDisciplineIds = [];
+    if (!isPG) {
+      const [majDisc] = await db.query(
+        `SELECT DISTINCT sub.discipline_id
+         FROM student_subject_enrollment e
+         JOIN subjects sub ON e.subject_id = sub.subject_id
+         WHERE e.student_id = ? AND sub.category = 'MAJOR'
+           AND e.status = 'ACCEPTED' AND sub.discipline_id IS NOT NULL`,
+        [req.params.student_id]
+      );
+      majorDisciplineIds = majDisc.map(r => r.discipline_id);
+
+      // Fallback: if no accepted major yet, use programme's discipline
+      if (majorDisciplineIds.length === 0) {
+        const [progDisc] = await db.query(
+          `SELECT DISTINCT s.discipline_id
+           FROM subjects s
+           WHERE s.programme_id = ? AND s.category = 'MAJOR' AND s.discipline_id IS NOT NULL`,
+          [student.programme_id]
+        );
+        majorDisciplineIds = progDisc.map(r => r.discipline_id);
+      }
     }
 
     // PG: subjects from programme_subject_pool
@@ -98,7 +118,7 @@ router.get('/subjects/:student_id', async (req, res) => {
       isPG
         ? `SELECT s.subject_id, s.subject_code, s.subject_name, s.category,
                   s.semester, s.credits, s.internal_marks,
-                  s.teacher_id, s.level_id, s.programme_id, s.faculty_id,
+                  s.level_id, s.programme_id, s.faculty_id,
                   s.discipline_id, s.is_common, d.discipline_name,
                   e.enrollment_id, e.status AS enrollment_status,
                   e.is_major, e.remarks
@@ -112,7 +132,7 @@ router.get('/subjects/:student_id', async (req, res) => {
            ORDER BY s.category, s.subject_code`
         : `SELECT s.subject_id, s.subject_code, s.subject_name, s.category,
                   s.semester, s.credits, s.internal_marks,
-                  s.teacher_id, s.level_id, s.programme_id, s.faculty_id,
+                  s.level_id, s.programme_id, s.faculty_id,
                   s.discipline_id, s.is_common, d.discipline_name,
                   e.enrollment_id, e.status AS enrollment_status,
                   e.is_major, e.remarks
@@ -124,14 +144,34 @@ router.get('/subjects/:student_id', async (req, res) => {
              ON psp.subject_id = s.subject_id AND psp.programme_id = ?
            WHERE s.semester = ?
              AND (
-               (s.category = 'MAJOR' AND s.programme_id = ? AND (? = 0 OR s.discipline_id IN (?)))
-               OR (s.category != 'MAJOR' AND s.is_common = TRUE AND s.level_id = ?)
+               -- MAJOR: only from student's programme
+               (s.category = 'MAJOR' AND s.programme_id = ?)
+               OR (
+                 s.category != 'MAJOR' AND s.is_common = TRUE AND s.level_id = ?
+                 AND (
+                   -- VAC, AEC, SEC: show ALL (no discipline restriction)
+                   s.category IN ('VAC', 'AEC', 'SEC')
+                   OR
+                   -- MDC: exclude student's MAJOR discipline subjects
+                   (s.category = 'MDC' AND (? = 0 OR s.discipline_id NOT IN (?)))
+                   OR
+                   -- MIC: exclude student's MAJOR discipline subjects
+                   (s.category = 'MIC' AND (? = 0 OR s.discipline_id NOT IN (?)))
+                   OR
+                   -- Everything else: show all
+                   (s.category NOT IN ('VAC','AEC','SEC','MDC','MIC'))
+                 )
+               )
                OR (psp.id IS NOT NULL)
              )
            ORDER BY s.category, s.subject_code`,
       isPG
         ? [student.programme_id, req.params.student_id, student.semester]
-        : [req.params.student_id, student.programme_id, student.semester, student.programme_id, disciplineIds.length, disciplineIds.length ? disciplineIds : [0], student.level_id]
+        : [req.params.student_id, student.programme_id, student.semester,
+           student.programme_id,
+           student.level_id,
+           majorDisciplineIds.length, majorDisciplineIds.length ? majorDisciplineIds : [0],
+           majorDisciplineIds.length, majorDisciplineIds.length ? majorDisciplineIds : [0]]
     );
 
     // Add T/P pairing info for MDC, SEC, MAJOR
@@ -184,7 +224,12 @@ router.post('/save-draft/:student_id', verify('student', 'admin'), async (req, r
       'SELECT * FROM students WHERE student_id = ?', [req.params.student_id]
     );
     if (!studentRows.length) return res.status(404).json({ error: 'Student not found' });
-    if (studentRows[0].enrollment_submitted)
+    // Check for non-draft submitted records instead of relying on flag
+    const [submittedCheck] = await db.query(
+      'SELECT COUNT(*) as count FROM student_subject_enrollment WHERE student_id = ? AND is_draft = 0',
+      [req.params.student_id]
+    );
+    if (submittedCheck[0].count > 0)
       return res.status(400).json({ error: 'Enrollment already submitted and locked' });
 
     for (const d of decisions) {
@@ -522,6 +567,20 @@ router.post('/submit/:student_id', verify('student', 'admin'), async (req, res) 
     await db.query('UPDATE students SET enrollment_submitted = 1 WHERE student_id = ?', [req.params.student_id]);
 
     res.json({ message: 'Enrollment submitted successfully!' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── POST /enroll-semester — Auto-enroll student in all subjects for their semester (admin only)
+router.post("/enroll-semester", verify("admin"), async (req, res) => {
+  const { student_id, semester, academic_year_id } = req.body;
+  if (!student_id || !semester || !academic_year_id)
+    return res.status(400).json({ error: "student_id, semester and academic_year_id are required" });
+  try {
+    await db.query("CALL EnrollStudentInSemester(?, ?, ?, @count, @msg)",
+      [student_id, semester, academic_year_id]);
+    const [[result]] = await db.query("SELECT @count AS enrolled_count, @msg AS message");
+    const isError = result.message && result.message.startsWith("ERROR");
+    res.status(isError ? 400 : 200).json(result);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

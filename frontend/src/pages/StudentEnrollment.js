@@ -25,7 +25,7 @@ const categoryColors = {
   SEMINAR:'#553c9a', INTERNSHIP:'#234e52', OEC:'#1a365d',
 };
 
-const FIXED_CATEGORIES = new Set(['SEMINAR', 'INTERNSHIP']);
+const FIXED_CATEGORIES = new Set(['SEMINAR', 'INTERNSHIP', 'MAJOR']);
 
 export default function StudentEnrollment({ student, onBack }) {
   const isPG = Number(student.level_id) === 2
@@ -34,7 +34,7 @@ export default function StudentEnrollment({ student, onBack }) {
 
   const [subjects, setSubjects]                 = useState([]);
   const [enrollments, setEnrollments]           = useState({});
-  const [submitted, setSubmitted]               = useState(student.enrollment_submitted === 1);
+  const [submitted, setSubmitted]               = useState(false); // always fetch fresh from DB
   const [loading, setLoading]                   = useState(true);
   const [submitting, setSubmitting]             = useState(false);
   const [msg, setMsg]                           = useState('');
@@ -62,12 +62,12 @@ export default function StudentEnrollment({ student, onBack }) {
     : `✅ DEC valid: Finance=${decFinance}, HR=${decHR}, Marketing=${decMarketing}`;
 
   const categoryRules = {
-    MAJOR:              '🔒 Compulsory. All subjects are pre-selected for your programme.',
+    MAJOR:              '🔒 Pre-assigned by college. These are your Discipline Specific Courses (DSC).',
     MIC:                '⚠️ Select exactly 1 subject. Must be from a different discipline than your MAJOR.',
     VAC:                '⚠️ Select exactly 1 subject.',
     AEC:                '⚠️ Select exactly 1 subject.',
     MDC:                '⚠️ Select 1 group only. For 3-credit: select 1 subject. For 2-credit: select both Theory(T) + Practical(P) together. Must be from a different discipline than your MAJOR.',
-    SEC:                isPG ? '⚠️ Select exactly 1 SEC subject.' : '⚠️ Select 1 group only. For 3-credit: select 1 subject. For 2-credit: select both Theory(T) + Practical(P) together. No discipline restriction.',
+    SEC:                isPG ? '📌 Select exactly 1 SEC subject.' : '📌 Select 1 subject totalling exactly 3 credits (standalone Theory OR Theory+Practical pair).',
     ELECTIVE:           '⚠️ Select exactly 1 subject from the options below.',
     ELECTIVE_FINANCE:   decMsg,
     ELECTIVE_HR:        decMsg,
@@ -87,8 +87,9 @@ export default function StudentEnrollment({ student, onBack }) {
         API.get(`/enrollment/status/${student.student_id}`)
       ]);
       setSubjects(subRes.data);
-      const hasSubmitted = enrollRes.data.some(e => e.is_draft === 0 && e.status !== 'PENDING');
-      setSubmitted(hasSubmitted);
+      // Only use live enrollment data — never trust stale localStorage
+      const hasNonDraft = enrollRes.data.some(e => e.is_draft === 0 && e.status !== 'PENDING');
+      setSubmitted(hasNonDraft);
 
       const enrollState = {};
       subRes.data.forEach(s => {
@@ -105,10 +106,10 @@ export default function StudentEnrollment({ student, onBack }) {
         };
       });
 
-      // Auto-accept fixed categories
+      // MAJOR: always show as ACCEPTED (pre-assigned by admin)
+      // Other fixed categories (SEMINAR, INTERNSHIP): auto-accept
       subRes.data.forEach(s => {
-        const isFixed = FIXED_CATEGORIES.has(s.category) || (isPG && s.category === 'MAJOR');
-        if (isFixed) {
+        if (FIXED_CATEGORIES.has(s.category)) {
           enrollState[s.subject_id] = {
             ...enrollState[s.subject_id],
             status: s.enrollment_status || 'ACCEPTED'
@@ -121,9 +122,11 @@ export default function StudentEnrollment({ student, onBack }) {
     finally { setLoading(false); }
   };
 
+  const [popup, setPopup] = useState(null);
   const showMsg = (text, type = 'success') => {
     setMsg(text); setMsgType(type);
-    setTimeout(() => setMsg(''), 6000);
+    setPopup({text, type});
+    setTimeout(() => { setMsg(''); setPopup(null); }, 4000);
   };
 
   const getBaseCode = (code) => {
@@ -133,115 +136,95 @@ export default function StudentEnrollment({ student, onBack }) {
   };
 
   const isFixedSubject = (category) => {
-    return FIXED_CATEGORIES.has(category) || (isPG && category === 'MAJOR');
+    return FIXED_CATEGORIES.has(category); // MAJOR always fixed — pre-assigned by admin
   };
 
   const handleDecision = (subject_id, newStatus) => {
     if (submitted) return;
-    // Auto-accept fixed subjects
-    setEnrollments(prev => {
-      const updated = { ...prev };
-      subjects.forEach(sub => {
-        if (isFixedSubject(sub.category, sub.subject_id)) {
-          if (!updated[sub.subject_id] || updated[sub.subject_id].status === 'PENDING') {
-            updated[sub.subject_id] = { status: 'ACCEPTED', is_major: false, remarks: '' };
-          }
-        }
-      });
-      return updated;
-    });
     const sub = subjects.find(s => s.subject_id === subject_id);
     if (!sub || isFixedSubject(sub.category)) return;
 
     setEnrollments(prev => {
       const updated = { ...prev, [subject_id]: { ...prev[subject_id], status: newStatus } };
+      const selectedBase = getBaseCode(sub.subject_code);
 
-      // Auto-pair T+P for MDC/SEC/MAJOR(UG)
-      if (['MDC', 'SEC', 'MAJOR'].includes(sub.category) && sub.pair_code) {
+      // ── Step 1: Auto-pair T+P for MDC/SEC ───────────────────────────
+      if (['MDC','SEC'].includes(sub.category) && sub.pair_code) {
         const pair = subjects.find(s => s.subject_code.trim() === sub.pair_code.trim());
-        if (pair) updated[pair.subject_id] = { ...prev[pair.subject_id], status: newStatus };
+        if (pair) updated[pair.subject_id] = { ...updated[pair.subject_id], status: newStatus };
       }
 
-      // Auto-reject others in single-select categories (exclude T/P pair for SEC/MDC)
-      if (['MIC', 'VAC', 'AEC', 'SEC', 'OEC', 'ELECTIVE'].includes(sub.category) && newStatus === 'ACCEPTED') {
-        subjects.forEach(s => {
-          if (s.subject_id !== subject_id && s.category === sub.category) {
-            // Don't reject the T/P pair partner
-            const isPairPartner = sub.pair_code && s.subject_code.trim() === sub.pair_code.trim();
-            if (!isPairPartner) {
+      if (newStatus === 'ACCEPTED') {
+
+        // ── Step 3: MIC — reject all others (only 1, 2 credits) ──────────
+        if (sub.category === 'MIC') {
+          subjects.forEach(s => {
+            if (s.subject_id !== subject_id && s.category === 'MIC') {
               updated[s.subject_id] = { ...updated[s.subject_id], status: 'REJECTED' };
             }
-          }
-        });
-      }
+          });
+        }
 
-      // DEC auto-reject: when 4 DEC accepted, reject all remaining pending DEC subjects
-      if (['ELECTIVE_FINANCE','ELECTIVE_HR','ELECTIVE_MARKETING'].includes(sub.category) && newStatus === 'ACCEPTED') {
-        const DEC_CATS = ['ELECTIVE_FINANCE','ELECTIVE_HR','ELECTIVE_MARKETING'];
-        const acceptedDEC = subjects.filter(s =>
-          DEC_CATS.includes(s.category) &&
-          (updated[s.subject_id]?.status === 'ACCEPTED')
-        ).length;
-        if (acceptedDEC >= 4) {
-          // Validate combination before auto-rejecting
-          const fin = subjects.filter(s => s.category === 'ELECTIVE_FINANCE' && updated[s.subject_id]?.status === 'ACCEPTED').length;
-          const hr  = subjects.filter(s => s.category === 'ELECTIVE_HR'      && updated[s.subject_id]?.status === 'ACCEPTED').length;
-          const mkt = subjects.filter(s => s.category === 'ELECTIVE_MARKETING'&& updated[s.subject_id]?.status === 'ACCEPTED').length;
-          const groups = [fin, hr, mkt].filter(n => n > 0);
-          const isCore  = groups.length === 1 && groups[0] === 4;
-          const isMixed = groups.length === 2 && groups.every(n => n === 2);
-          if (isCore || isMixed) {
+        // ── Step 4: VAC — reject all others (only 1, 2 credits) ─────────
+        if (sub.category === 'VAC') {
+          subjects.forEach(s => {
+            if (s.subject_id !== subject_id && s.category === 'VAC') {
+              updated[s.subject_id] = { ...updated[s.subject_id], status: 'REJECTED' };
+            }
+          });
+        }
+
+        // ── Step 5: AEC — reject all others (only 1, 2 credits) ─────────
+        if (sub.category === 'AEC') {
+          subjects.forEach(s => {
+            if (s.subject_id !== subject_id && s.category === 'AEC') {
+              updated[s.subject_id] = { ...updated[s.subject_id], status: 'REJECTED' };
+            }
+          });
+        }
+
+        // ── Step 6: MDC — reject all OTHER base groups (T+P together) ────
+        if (sub.category === 'MDC') {
+          subjects.forEach(s => {
+            if (s.category === 'MDC' && getBaseCode(s.subject_code) !== selectedBase) {
+              updated[s.subject_id] = { ...updated[s.subject_id], status: 'REJECTED' };
+            }
+          });
+        }
+
+        // ── Step 7: SEC — reject all OTHER base groups (T+P together) ────
+        if (sub.category === 'SEC') {
+          subjects.forEach(s => {
+            if (s.category === 'SEC' && getBaseCode(s.subject_code) !== selectedBase) {
+              updated[s.subject_id] = { ...updated[s.subject_id], status: 'REJECTED' };
+            }
+          });
+        }
+
+        // ── Step 8: DEC — auto-reject remaining when valid 4 accepted ────
+        if (['ELECTIVE_FINANCE','ELECTIVE_HR','ELECTIVE_MARKETING'].includes(sub.category)) {
+          const DEC_CATS = ['ELECTIVE_FINANCE','ELECTIVE_HR','ELECTIVE_MARKETING'];
+          const fin = subjects.filter(s => s.category==='ELECTIVE_FINANCE'   && updated[s.subject_id]?.status==='ACCEPTED').length;
+          const hr  = subjects.filter(s => s.category==='ELECTIVE_HR'        && updated[s.subject_id]?.status==='ACCEPTED').length;
+          const mkt = subjects.filter(s => s.category==='ELECTIVE_MARKETING' && updated[s.subject_id]?.status==='ACCEPTED').length;
+          const total = fin + hr + mkt;
+          const groups = [fin,hr,mkt].filter(n=>n>0);
+          const isCore  = groups.length===1 && groups[0]===4;
+          const isMixed = groups.length===2 && groups.every(n=>n===2);
+          if (total >= 4 && (isCore || isMixed)) {
             subjects.forEach(s => {
-              if (DEC_CATS.includes(s.category) && updated[s.subject_id]?.status === 'PENDING') {
+              if (DEC_CATS.includes(s.category) && updated[s.subject_id]?.status==='PENDING') {
                 updated[s.subject_id] = { ...updated[s.subject_id], status: 'REJECTED' };
               }
             });
           }
         }
-      }
 
-      // Auto-reject other MDC groups (keep pair partner of selected subject)
-      if (sub.category === 'MDC' && newStatus === 'ACCEPTED') {
-        const selectedBase = getBaseCode(sub.subject_code);
-        subjects.forEach(s => {
-          if (s.category === 'MDC' && getBaseCode(s.subject_code) !== selectedBase) {
-            updated[s.subject_id] = { ...updated[s.subject_id], status: 'REJECTED' };
-          }
-        });
-      }
-
-      // Auto-reject other SEC groups (keep pair partner of selected subject)
-      if (sub.category === 'SEC' && newStatus === 'ACCEPTED' && sub.pair_code) {
-        const selectedBase = getBaseCode(sub.subject_code);
-        subjects.forEach(s => {
-          if (s.category === 'SEC' && getBaseCode(s.subject_code) !== selectedBase) {
-            updated[s.subject_id] = { ...updated[s.subject_id], status: 'REJECTED' };
-          }
-        });
-      }
-
-      // Auto-reject other MAJOR groups when credits reached (keep pair partner)
-      if (!isPG && sub.category === 'MAJOR' && newStatus === 'ACCEPTED') {
-        // Re-check after auto-pair
-        const selectedBase = getBaseCode(sub.subject_code);
-        // Only reject unrelated subjects if pair was also accepted
-        const pairAccepted = !sub.pair_code || updated[subjects.find(s => s.subject_code.trim() === sub.pair_code?.trim())?.subject_id]?.status === 'ACCEPTED';
-        if (pairAccepted) {
-          // Credit check handled below
-        }
-      }
-
-      // UG MAJOR: auto-reject when 12 credits reached
-      if (!isPG && sub.category === 'MAJOR') {
-        const accMajors = subjects.filter(s => s.category === 'MAJOR' && updated[s.subject_id]?.status === 'ACCEPTED');
-        const totalCr = accMajors.reduce((sum, s) => sum + (s.credits || 0), 0);
-        const accBases = new Set(accMajors.map(s => getBaseCode(s.subject_code)));
-        if (totalCr >= 12) {
+        // ── Step 9: OEC, ELECTIVE — single select ─────────────────────────
+        if (['OEC','ELECTIVE'].includes(sub.category)) {
           subjects.forEach(s => {
-            if (s.category === 'MAJOR' && updated[s.subject_id]?.status === 'PENDING') {
-              if (!accBases.has(getBaseCode(s.subject_code))) {
-                updated[s.subject_id] = { ...updated[s.subject_id], status: 'REJECTED' };
-              }
+            if (s.subject_id !== subject_id && s.category === sub.category) {
+              updated[s.subject_id] = { ...updated[s.subject_id], status: 'REJECTED' };
             }
           });
         }
@@ -274,40 +257,63 @@ export default function StudentEnrollment({ student, onBack }) {
     const majorDisciplines = (byCategory['MAJOR'] || []).map(s => s.discipline_id).filter(Boolean);
     const getBase = (code) => { const c=code.trim(); const l=c.slice(-1).toUpperCase(); return ['T','P'].includes(l)?c.slice(0,-1):c; };
 
+    // DSC/MAJOR is pre-assigned by admin — no validation needed from student
+
+    // ── MIC: 1 subject, exactly 2 credits, NOT same discipline as MAJOR ──
     const mic = byCategory['MIC'] || [];
-    if (mic.length === 0) errors.push('❌ MIC: Must select exactly 1 subject');
-    else if (mic.length > 1) errors.push(`❌ MIC: Select only 1 (selected ${mic.length})`);
-    else if (majorDisciplines.includes(mic[0].discipline_id)) errors.push(`❌ MIC: "${mic[0].subject_name}" conflicts with your MAJOR discipline`);
+    if (subjects.some(s => s.category === 'MIC')) {
+      const micCr = mic.reduce((sum,s) => sum + Number(s.credits||0), 0);
+      if (mic.length === 0) errors.push('❌ MIC: Must select 1 subject (2 credits)');
+      else if (micCr !== 2) errors.push(`❌ MIC: Must be exactly 2 credits (currently ${micCr})`);
+      mic.forEach(s => { if (majorDisciplines.includes(s.discipline_id)) errors.push(`❌ MIC: "${s.subject_name}" — same discipline as MAJOR not allowed`); });
+    }
 
+    // ── VAC: 1 subject, exactly 2 credits ──
     const vac = byCategory['VAC'] || [];
-    if (vac.length === 0) errors.push('❌ VAC: Must select exactly 1 subject');
-    else if (vac.length > 1) errors.push(`❌ VAC: Select only 1 (selected ${vac.length})`);
+    if (subjects.some(s => s.category === 'VAC')) {
+      const vacCr = vac.reduce((sum,s) => sum + Number(s.credits||0), 0);
+      if (vac.length === 0) errors.push('❌ VAC: Must select 1 subject (2 credits)');
+      else if (vacCr !== 2) errors.push(`❌ VAC: Must be exactly 2 credits (currently ${vacCr})`);
+    }
 
+    // ── AEC: 1 subject, exactly 2 credits ──
     const aec = byCategory['AEC'] || [];
-    if (aec.length > 1) errors.push(`❌ AEC: Select only 1 (selected ${aec.length})`);
+    if (subjects.some(s => s.category === 'AEC')) {
+      const aecCr = aec.reduce((sum,s) => sum + Number(s.credits||0), 0);
+      if (aec.length === 0) errors.push('❌ AEC: Must select 1 subject (2 credits)');
+      else if (aecCr !== 2) errors.push(`❌ AEC: Must be exactly 2 credits (currently ${aecCr})`);
+    }
 
+    // ── MDC: exactly 3 credits (3cr standalone OR 2+1 T+P pair), NOT same discipline as MAJOR ──
     const mdc = byCategory['MDC'] || [];
-    if (mdc.length > 0) {
-      mdc.forEach(s => { if (majorDisciplines.includes(s.discipline_id)) errors.push(`❌ MDC: "${s.subject_name}" conflicts with MAJOR`); });
-      const mdcGroups = {};
-      mdc.forEach(s => { const b=getBase(s.subject_code); if(!mdcGroups[b]) mdcGroups[b]=[]; mdcGroups[b].push(s); });
-      if (Object.keys(mdcGroups).length > 1) errors.push('❌ MDC: Select from only ONE group');
+    if (subjects.some(s => s.category === 'MDC')) {
+      const mdcCr = mdc.reduce((sum,s) => sum + Number(s.credits||0), 0);
+      if (mdc.length === 0) errors.push('❌ MDC: Must select 1 subject (3 credits)');
+      else {
+        const mdcGroups = new Set(mdc.map(s => getBase(s.subject_code)));
+        if (mdcGroups.size > 1) errors.push('❌ MDC: Select only ONE subject (you selected from multiple groups)');
+        if (mdcCr !== 3) errors.push(`❌ MDC: Must be exactly 3 credits (currently ${mdcCr})`);
+        mdc.forEach(s => { if (majorDisciplines.includes(s.discipline_id)) errors.push(`❌ MDC: "${s.subject_name}" — same discipline as MAJOR not allowed`); });
+      }
     }
 
+    // ── SEC: 1 group only (T+P together), exactly 3 credits ──
     const sec = byCategory['SEC'] || [];
-    if (sec.length > 0) {
-      const secGroups = {};
-      sec.forEach(s => { const b=getBase(s.subject_code); if(!secGroups[b]) secGroups[b]=[]; secGroups[b].push(s); });
-      if (Object.keys(secGroups).length > 1) errors.push('❌ SEC: Select from only ONE group');
+    if (subjects.some(s => s.category === 'SEC')) {
+      const secCr = sec.reduce((sum,s) => sum + Number(s.credits||0), 0);
+      if (sec.length === 0) errors.push('❌ SEC: Must select 1 group (3 credits)');
+      else {
+        const secGroups = new Set(sec.map(s => getBase(s.subject_code)));
+        if (secGroups.size > 1) errors.push('❌ SEC: Select from only ONE group');
+        if (secCr !== 3) errors.push(`❌ SEC: Must be exactly 3 credits (currently ${secCr})`);
+      }
     }
 
-    const major = byCategory['MAJOR'] || [];
-    const majorTotalCr = major.reduce((sum, s) => sum + (s.credits||0), 0);
-    if (majorTotalCr < 12) errors.push(`❌ MAJOR: Need 12 credits (currently ${majorTotalCr})`);
-    else if (majorTotalCr > 12) errors.push(`❌ MAJOR: Too many credits (${majorTotalCr})`);
-
-    const pending = subjects.filter(s => prev[s.subject_id]?.status === 'PENDING');
-    if (pending.length > 0) errors.push(`❌ ${pending.length} subject(s) still pending`);
+    // ── Pending check ──
+    const nonFixedPending = subjects.filter(s =>
+      !isFixedSubject(s.category) && prev[s.subject_id]?.status === 'PENDING'
+    );
+    if (nonFixedPending.length > 0) errors.push(`❌ ${nonFixedPending.length} subject(s) still pending — Accept or Reject all`);
 
     return errors;
   };
@@ -448,6 +454,14 @@ export default function StudentEnrollment({ student, onBack }) {
 
   return (
     <div style={s.container}>
+      {popup && (
+        <div style={{position:'fixed',top:0,left:0,width:'100%',height:'100%',display:'flex',alignItems:'center',justifyContent:'center',zIndex:9999,pointerEvents:'none'}}>
+          <div style={{background:popup.type==='error'?'#e53e3e':popup.type==='warning'?'#ed8936':'#38a169',color:'#fff',padding:'1.25rem 2rem',borderRadius:'14px',boxShadow:'0 8px 32px rgba(0,0,0,0.25)',fontSize:'1rem',fontWeight:'700',maxWidth:'420px',textAlign:'center',animation:'popupFade 0.3s ease'}}>
+            {popup.text}
+          </div>
+        </div>
+      )}
+      <style>{'@keyframes popupFade { from { opacity:0; transform:scale(0.85); } to { opacity:1; transform:scale(1); } }'}</style>
       <div style={s.header}>
         <button style={s.backBtn} onClick={onBack}>← Back</button>
         <div>

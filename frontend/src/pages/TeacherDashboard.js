@@ -30,7 +30,8 @@ export default function TeacherDashboard({ teacher, onLogout }) {
 
   useEffect(() => { fetchSubjects(); fetchAllSubjects(); fetchProgrammes(); }, []);
 
-  const showMsg = (text, type = 'success') => { setMsg(text); setMsgType(type); setTimeout(() => setMsg(''), 4000); };
+  const [popup, setPopup] = useState(null);
+  const showMsg = (text, type = 'success') => { setMsg(text); setMsgType(type); setPopup({text,type}); setTimeout(()=>{setMsg('');setPopup(null);},4000); };
 
   const fetchSubjects = async () => {
     try {
@@ -161,6 +162,14 @@ export default function TeacherDashboard({ teacher, onLogout }) {
 
   return (
     <div style={st.container}>
+      {popup && (
+        <div style={{position:'fixed',top:0,left:0,width:'100%',height:'100%',display:'flex',alignItems:'center',justifyContent:'center',zIndex:9999,pointerEvents:'none'}}>
+          <div style={{background:popup.type==='error'?'#e53e3e':popup.type==='warning'?'#ed8936':'#38a169',color:'#fff',padding:'1.25rem 2rem',borderRadius:'14px',boxShadow:'0 8px 32px rgba(0,0,0,0.25)',fontSize:'1rem',fontWeight:'700',maxWidth:'420px',textAlign:'center',animation:'popupFade 0.3s ease'}}>
+            {popup.text}
+          </div>
+        </div>
+      )}
+      <style>{'@keyframes popupFade { from { opacity:0; transform:scale(0.85); } to { opacity:1; transform:scale(1); } }'}</style>
       <nav style={st.nav}>
         <h2 style={st.navTitle}>🎓 College ERP — Teacher</h2>
         <div style={{ display:'flex', alignItems:'center', gap:'1rem' }}>

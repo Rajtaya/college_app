@@ -106,7 +106,7 @@ router.get('/student/:student_id/summary', async (req, res) => {
 router.get('/subject/:subject_id', async (req, res) => {
   try {
     const [rows] = await db.query(
-      `SELECT m.*, st.name, st.roll_no
+      `SELECT m.*, CONCAT(st.first_name, ' ', st.last_name) AS name, st.roll_no
        FROM marks m
        JOIN students st ON m.student_id = st.student_id
        WHERE m.subject_id = ?
@@ -117,6 +117,20 @@ router.get('/subject/:subject_id', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// GET /student/:student_id/detailed — Marks with percentage + PASS/FAIL per subject
+router.get('/student/:student_id/detailed', async (req, res) => {
+  try {
+    const { semester, academic_year_id } = req.query;
+    let query = 'SELECT * FROM vw_student_marks_summary WHERE student_id = ? AND is_visible_to_student = 1';
+    const params = [req.params.student_id];
+    if (semester)         { query += ' AND semester = ?';          params.push(semester); }
+    if (academic_year_id) { query += ' AND academic_year_id = ?';  params.push(academic_year_id); }
+    query += ' ORDER BY subject_name, exam_type';
+    const [rows] = await db.query(query, params);
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // PUT /:mark_id — Update marks

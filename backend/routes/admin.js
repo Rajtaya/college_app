@@ -23,8 +23,7 @@ router.use(verify('admin'));
 router.get('/students', async (req, res) => {
   try {
     const [rows] = await db.query(
-      `SELECT s.student_id, s.roll_no, s.name, s.email, s.phone, s.course,
-              s.semester, s.year, s.level_id, s.faculty_id, s.programme_id,
+      `SELECT s.student_id, s.roll_no, CONCAT(s.first_name, ' ', s.last_name) AS name, s.email, s.phone, s.semester, s.study_year, s.level_id, s.faculty_id, s.programme_id,
               l.level_name, p.programme_name, f.faculty_name
        FROM students s
        LEFT JOIN levels l ON s.level_id = l.level_id
@@ -44,7 +43,7 @@ router.delete('/students/:id', async (req, res) => {
 
 router.get('/teachers', async (req, res) => {
   try {
-    const [teachers] = await db.query('SELECT * FROM teachers ORDER BY name');
+    const [teachers] = await db.query(`SELECT teacher_id, CONCAT(first_name, ' ', last_name) AS name, title, email, phone, employee_code, designation FROM teachers ORDER BY first_name`);
     const [tdRows] = await db.query(
       `SELECT td.teacher_id, td.discipline_id, d.discipline_name
        FROM teacher_disciplines td
@@ -61,12 +60,12 @@ router.get('/teachers', async (req, res) => {
 });
 
 router.post('/teachers', async (req, res) => {
-  const { name, email, phone, department, password, discipline_ids } = req.body;
+  const { first_name, last_name, email, phone, password, discipline_ids } = req.body;
   try {
     const hashed = await bcrypt.hash(password, 12);
     const [result] = await db.query(
-      'INSERT INTO teachers (name, email, phone, department, password) VALUES (?, ?, ?, ?, ?)',
-      [name, email, phone, department, hashed]
+      'INSERT INTO teachers (first_name, last_name, email, phone, password) VALUES (?, ?, ?, ?, ?)',
+      [first_name, last_name||'', email, phone, hashed]
     );
     const teacher_id = result.insertId;
     // Insert disciplines
@@ -83,11 +82,11 @@ router.post('/teachers', async (req, res) => {
 });
 
 router.put('/teachers/:id', async (req, res) => {
-  const { name, email, phone, department, discipline_ids } = req.body;
+  const { first_name, last_name, email, phone, discipline_ids } = req.body;
   try {
     const [result] = await db.query(
-      'UPDATE teachers SET name=?, email=?, phone=?, department=? WHERE teacher_id=?',
-      [name, email, phone, department, req.params.id]
+      'UPDATE teachers SET first_name=?, last_name=?, email=?, phone=? WHERE teacher_id=?',
+      [first_name, last_name||'', email, phone, req.params.id]
     );
     if (result.affectedRows === 0) return res.status(404).json({ error: 'Teacher not found' });
     // Replace disciplines
@@ -186,7 +185,7 @@ router.delete('/subjects/:id', async (req, res) => {
 
 router.get('/attendance', async (req, res) => {
   try {
-    const [rows] = await db.query(`SELECT a.*, s.name as student_name, sub.subject_name FROM attendance a JOIN students s ON a.student_id = s.student_id JOIN subjects sub ON a.subject_id = sub.subject_id`);
+    const [rows] = await db.query(`SELECT a.*, CONCAT(s.first_name, ' ', s.last_name) AS student_name, sub.subject_name FROM attendance a JOIN students s ON a.student_id = s.student_id JOIN subjects sub ON a.subject_id = sub.subject_id`);
     res.json(rows);
   } catch (err) { console.error(err); res.status(500).json({ error: 'Internal server error' }); }
 });
@@ -196,7 +195,7 @@ router.get('/attendance/export', async (req, res) => {
   try {
     const [rows] = await db.query(`
       SELECT
-        st.roll_no, st.name as student_name,
+        st.roll_no, CONCAT(st.first_name, ' ', st.last_name) AS student_name,
         p.programme_name, l.level_name, st.semester,
         sub.subject_code, sub.subject_name, sub.category,
         a.date, a.status as attendance_status
@@ -216,7 +215,7 @@ router.get('/attendance/summary', async (req, res) => {
   try {
     const [rows] = await db.query(`
       SELECT
-        st.roll_no, st.name as student_name,
+        st.roll_no, CONCAT(st.first_name, ' ', st.last_name) AS student_name,
         p.programme_name, l.level_name, st.semester,
         sub.subject_code, sub.subject_name, sub.category,
         COUNT(a.attendance_id) as total_classes,
@@ -241,7 +240,7 @@ router.get('/fees/export', async (req, res) => {
   try {
     const [rows] = await db.query(`
       SELECT
-        f.fee_id, st.roll_no, st.name as student_name,
+        f.fee_id, st.roll_no, CONCAT(st.first_name, ' ', st.last_name) AS student_name,
         p.programme_name, l.level_name, st.semester,
         f.fee_type, f.amount, f.due_date, f.paid_date,
         f.status, f.transaction_ref
@@ -258,7 +257,7 @@ router.get('/fees/export', async (req, res) => {
 router.get('/fees', async (req, res) => {
   try {
     const [rows] = await db.query(
-      `SELECT f.*, s.name as student_name, s.roll_no, p.programme_name, l.level_name, s.semester
+      `SELECT f.*, CONCAT(s.first_name, ' ', s.last_name) AS student_name, s.roll_no, p.programme_name, l.level_name, s.semester
        FROM fees f
        JOIN students s ON f.student_id = s.student_id
        LEFT JOIN programmes p ON s.programme_id = p.programme_id
@@ -341,7 +340,7 @@ router.put('/fees/mark-overdue', async (req, res) => {
 
 router.get('/marks', async (req, res) => {
   try {
-    const [rows] = await db.query(`SELECT m.*, s.name as student_name, sub.subject_name FROM marks m JOIN students s ON m.student_id = s.student_id JOIN subjects sub ON m.subject_id = sub.subject_id`);
+    const [rows] = await db.query(`SELECT m.*, CONCAT(s.first_name, ' ', s.last_name) AS student_name, sub.subject_name FROM marks m JOIN students s ON m.student_id = s.student_id JOIN subjects sub ON m.subject_id = sub.subject_id`);
     res.json(rows);
   } catch (err) { console.error(err); res.status(500).json({ error: 'Internal server error' }); }
 });
@@ -351,7 +350,7 @@ router.get('/marks/export', async (req, res) => {
   try {
     const [rows] = await db.query(`
       SELECT
-        st.roll_no, st.name as student_name,
+        st.roll_no, CONCAT(st.first_name, ' ', st.last_name) AS student_name,
         p.programme_name, l.level_name, st.semester,
         sub.subject_code, sub.subject_name, sub.category, sub.credits,
         m.exam_type, m.marks_obtained, m.max_marks,
@@ -378,7 +377,7 @@ router.delete('/marks/:id', async (req, res) => {
 
 router.get('/enrollment/summary', async (req, res) => {
   try {
-    const [rows] = await db.query(`SELECT st.student_id, st.roll_no, st.name as student_name, p.programme_name, l.level_name, st.semester, COUNT(e.enrollment_id) as total_enrolled, SUM(CASE WHEN e.status='ACCEPTED' THEN 1 ELSE 0 END) as accepted, SUM(CASE WHEN e.status='REJECTED' THEN 1 ELSE 0 END) as rejected, SUM(CASE WHEN e.status='PENDING' THEN 1 ELSE 0 END) as pending, MAX(e.admin_modified) as admin_modified FROM students st LEFT JOIN student_subject_enrollment e ON st.student_id = e.student_id LEFT JOIN programmes p ON st.programme_id = p.programme_id LEFT JOIN levels l ON st.level_id = l.level_id GROUP BY st.student_id ORDER BY st.roll_no`);
+    const [rows] = await db.query(`SELECT st.student_id, st.roll_no, CONCAT(st.first_name, ' ', st.last_name) AS student_name, p.programme_name, l.level_name, st.semester, COUNT(e.enrollment_id) as total_enrolled, SUM(CASE WHEN e.status='ACCEPTED' THEN 1 ELSE 0 END) as accepted, SUM(CASE WHEN e.status='REJECTED' THEN 1 ELSE 0 END) as rejected, SUM(CASE WHEN e.status='PENDING' THEN 1 ELSE 0 END) as pending, MAX(e.admin_modified) as admin_modified FROM students st LEFT JOIN student_subject_enrollment e ON st.student_id = e.student_id LEFT JOIN programmes p ON st.programme_id = p.programme_id LEFT JOIN levels l ON st.level_id = l.level_id GROUP BY st.student_id ORDER BY st.roll_no`);
     res.json(rows);
   } catch (err) { console.error(err); res.status(500).json({ error: 'Internal server error' }); }
 });
@@ -461,7 +460,7 @@ router.get('/enrollment/export', async (req, res) => {
   try {
     const [rows] = await db.query(`
       SELECT
-        st.roll_no, st.name as student_name,
+        st.roll_no, CONCAT(st.first_name, ' ', st.last_name) AS student_name,
         p.programme_name, l.level_name, st.semester,
         sub.subject_code, sub.subject_name, sub.category, sub.credits,
         d.discipline_name,
@@ -488,7 +487,7 @@ router.get('/enrollment/export-subject-wise', async (req, res) => {
   try {
     const [rows] = await db.query(`
       SELECT sub.subject_code, sub.subject_name, sub.category, sub.semester, sub.credits,
-             p.programme_name, st.roll_no, st.name as student_name, e.status
+             p.programme_name, st.roll_no, CONCAT(st.first_name, ' ', st.last_name) AS student_name, e.status
       FROM student_subject_enrollment e
       JOIN subjects sub ON e.subject_id = sub.subject_id
       JOIN students st ON e.student_id = st.student_id
@@ -498,6 +497,70 @@ router.get('/enrollment/export-subject-wise', async (req, res) => {
     );
     res.json(rows);
   } catch (err) { console.error(err); res.status(500).json({ error: 'Internal server error' }); }
+});
+
+// POST /admin/enrollment/import — Import: Roll No + Subject Code + Status
+router.post('/enrollment/import', async (req, res) => {
+  const { rows } = req.body;
+  if (!rows || !rows.length) return res.status(400).json({ error: 'No data provided' });
+
+  let success = 0, failed = 0, errors = [];
+
+  for (const row of rows) {
+    try {
+      const roll_no      = String(row.roll_no      || row['Roll No']      || '').trim();
+      const subject_code = String(row.subject_code || row['Subject Code'] || row['Major Subject'] || '').trim();
+      const status       = String(row.status       || row['Status']       || 'ACCEPTED').trim().toUpperCase();
+
+      if (!roll_no || !subject_code) {
+        failed++; errors.push(`Row missing roll_no or subject_code`); continue;
+      }
+      if (!['ACCEPTED','REJECTED','PENDING'].includes(status)) {
+        failed++; errors.push(`Invalid status "${status}" for ${roll_no}`); continue;
+      }
+
+      // Find student
+      const [students] = await db.query(
+        'SELECT student_id FROM students WHERE roll_no = ?', [roll_no]
+      );
+      if (!students.length) {
+        failed++; errors.push(`Student not found: ${roll_no}`); continue;
+      }
+      const student_id = students[0].student_id;
+
+      // Find subject
+      const [subjects] = await db.query(
+        'SELECT subject_id FROM subjects WHERE subject_code = ?', [subject_code]
+      );
+      if (!subjects.length) {
+        failed++; errors.push(`Subject not found: ${subject_code}`); continue;
+      }
+      const subject_id = subjects[0].subject_id;
+
+      // Upsert enrollment
+      const [existing] = await db.query(
+        'SELECT enrollment_id FROM student_subject_enrollment WHERE student_id = ? AND subject_id = ?',
+        [student_id, subject_id]
+      );
+      if (existing.length) {
+        await db.query(
+          'UPDATE student_subject_enrollment SET status = ?, admin_modified = 1, is_draft = 0 WHERE student_id = ? AND subject_id = ?',
+          [status, student_id, subject_id]
+        );
+      } else {
+        await db.query(
+          'INSERT INTO student_subject_enrollment (student_id, subject_id, status, admin_modified, is_draft) VALUES (?, ?, ?, 1, 0)',
+          [student_id, subject_id, status]
+        );
+      }
+      success++;
+    } catch(e) {
+      failed++;
+      errors.push(`Error processing row: ${e.message}`);
+    }
+  }
+
+  res.json({ message: `Imported ${success} enrollment(s)`, success, failed, errors: errors.slice(0,10) });
 });
 
 router.put('/enrollment/bulkupdate/:student_id', async (req, res) => {
@@ -515,9 +578,27 @@ router.put('/enrollment/bulkupdate/:student_id', async (req, res) => {
   } catch (err) { console.error(err); res.status(500).json({ error: 'Internal server error' }); }
 });
 
+// GET /admin/enrollment/reset-check/:student_id — Check dependent data before reset
+router.get('/enrollment/reset-check/:student_id', async (req, res) => {
+  try {
+    const [marks] = await db.query(
+      `SELECT COUNT(*) as count FROM marks m
+       JOIN student_subject_enrollment e ON m.student_id = e.student_id AND m.subject_id = e.subject_id
+       WHERE m.student_id = ?`, [req.params.student_id]
+    );
+    const [attendance] = await db.query(
+      `SELECT COUNT(*) as count FROM attendance a
+       JOIN student_subject_enrollment e ON a.student_id = e.student_id AND a.subject_id = e.subject_id
+       WHERE a.student_id = ?`, [req.params.student_id]
+    );
+    res.json({ marks: marks[0].count, attendance: attendance[0].count });
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Internal server error' }); }
+});
+
 router.delete('/enrollment/reset/:student_id', async (req, res) => {
   try {
     await db.query('DELETE FROM student_subject_enrollment WHERE student_id = ?', [req.params.student_id]);
+    await db.query('UPDATE students SET enrollment_submitted = 0 WHERE student_id = ?', [req.params.student_id]);
     res.json({ message: 'Enrollment reset successfully!' });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Internal server error' }); }
 });

@@ -21,7 +21,7 @@ router.get('/', async (req, res) => {
 });
 
 router.post('/', verify('admin'), async (req, res) => {
-  const { subject_code, subject_name, category, semester, credits, internal_marks, teacher_id, level_id, programme_id, faculty_id, discipline_id, discipline_name, is_common } = req.body;
+  const { subject_code, subject_name, category, semester, credits, internal_marks, level_id, programme_id, faculty_id, discipline_id, discipline_name, is_common } = req.body;
   try {
     let resolved_discipline_id = discipline_id || null;
     if (!resolved_discipline_id && discipline_name) {
@@ -35,9 +35,9 @@ router.post('/', verify('admin'), async (req, res) => {
     }
     const isCommon = ['MDC','MIC','SEC','VAC','AEC'].includes(category);
     const [result] = await db.query(
-      `INSERT INTO subjects (subject_code, subject_name, category, semester, credits, internal_marks, teacher_id, level_id, programme_id, faculty_id, discipline_id, is_common)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [subject_code, subject_name, category, semester, credits, internal_marks||0, teacher_id||null, level_id||null, isCommon?null:(programme_id||null), faculty_id||null, resolved_discipline_id, isCommon?true:false]
+      `INSERT INTO subjects (subject_code, subject_name, category, semester, credits, internal_marks, level_id, programme_id, faculty_id, discipline_id, is_common)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [subject_code, subject_name, category, semester, credits, internal_marks||0, level_id||null, isCommon?null:(programme_id||null), faculty_id||null, resolved_discipline_id, isCommon?true:false]
     );
     res.json({ message: 'Subject added', subject_id: result.insertId });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -70,14 +70,14 @@ router.get('/teacher/:teacher_id', async (req, res) => {
 router.get('/:subject_id/teachers', async (req, res) => {
   try {
     const [rows] = await db.query(
-      `SELECT t.teacher_id, t.name, t.email, t.department,
+      `SELECT t.teacher_id, CONCAT(t.first_name, ' ', t.last_name) AS name, t.email,
               st.id as assignment_id, st.section, st.programme_id, st.class_name,
               p.programme_name
        FROM subject_teachers st
        JOIN teachers t ON st.teacher_id = t.teacher_id
        LEFT JOIN programmes p ON st.programme_id = p.programme_id
        WHERE st.subject_id = ?
-       ORDER BY t.name, st.section`,
+       ORDER BY t.first_name, st.section`,
       [req.params.subject_id]
     );
     res.json(rows);
@@ -95,6 +95,18 @@ router.post('/:subject_id/teachers', verify('teacher', 'admin'), async (req, res
       [req.params.subject_id, teacher_id, section, programme_id, class_name]
     );
     res.json({ message: 'Teacher assigned to section' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// PUT /assignments/:assignment_id — edit an existing subject-teacher assignment
+router.put('/assignments/:assignment_id', verify('teacher', 'admin'), async (req, res) => {
+  const { section, programme_id, class_name } = req.body;
+  try {
+    await db.query(
+      'UPDATE subject_teachers SET section = ?, programme_id = ?, class_name = ? WHERE id = ?',
+      [section || 'A', programme_id || null, class_name || null, req.params.assignment_id]
+    );
+    res.json({ message: 'Assignment updated' });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

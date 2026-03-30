@@ -33,6 +33,8 @@ export default function AdminDashboard({ admin, onLogout }) {
   const [managingTeacher, setManagingTeacher] = useState(null);
   const [allSubjects, setAllSubjects] = useState([]);
   const [teacherSubjects, setTeacherSubjects] = useState([]);
+  const [assignmentData, setAssignmentData] = useState([]);
+  const [editingAssignment, setEditingAssignment] = useState(null);
   const [importing, setImporting] = useState(false);
   const studentFileRef = useRef();
   const teacherFileRef = useRef();
@@ -1011,6 +1013,7 @@ export default function AdminDashboard({ admin, onLogout }) {
   const openManageSubjects = async (teacher) => {
     setManagingTeacher(teacher);
     setEditingTeacher(null);
+    setEditingAssignment(null);
     try {
       const [filtered, assigned] = await Promise.all([
         API.get(`/admin/teachers/${teacher.teacher_id}/subjects`),
@@ -1018,6 +1021,7 @@ export default function AdminDashboard({ admin, onLogout }) {
       ]);
       setAllSubjects(filtered.data);
       setTeacherSubjects(assigned.data.map(s => s.subject_id));
+      setAssignmentData(assigned.data);
     } catch(e) { showMsg('Failed to load subjects', 'error'); }
   };
 
@@ -1030,6 +1034,7 @@ export default function AdminDashboard({ admin, onLogout }) {
       ]);
       setAllSubjects(filtered.data);
       setTeacherSubjects(assigned.data.map(s => s.subject_id));
+      setAssignmentData(assigned.data);
     } catch(e) {}
   };
 
@@ -1050,6 +1055,21 @@ export default function AdminDashboard({ admin, onLogout }) {
         showMsg('Subject assigned!');
       }
     } catch(e) { showMsg(e.response?.data?.error || 'Failed to update', 'error'); }
+  };
+
+  const handleUpdateAssignment = async (assignment) => {
+    try {
+      await API.put(`/subjects/assignments/${assignment.assignment_id}`, {
+        section: assignment.section,
+        programme_id: assignment.programme_id || null,
+        class_name: assignment.class_name || null
+      });
+      showMsg('Assignment updated!');
+      setEditingAssignment(null);
+      const assigned = await API.get(`/subjects/teacher/${managingTeacher.teacher_id}`);
+      setTeacherSubjects(assigned.data.map(s => s.subject_id));
+      setAssignmentData(assigned.data);
+    } catch(e) { showMsg(e.response?.data?.error || 'Failed to update assignment', 'error'); }
   };
 
   const handleBulkFee = async (e) => {
@@ -1076,7 +1096,7 @@ export default function AdminDashboard({ admin, onLogout }) {
   const downloadTemplate = (type) => {
     const templates = {
       students: [{ roll_no:'BA001', name:'Priya Sharma', email:'priya@college.com', phone:'9876543211', level_name:'UG', faculty_name:'Arts', programme_name:'B.A', semester:1, year:1, password:'password123', discipline_1:'Economics', discipline_2:'History', discipline_3:'English' }],
-      teachers: [{ name:'Dr. Sharma', email:'sharma@college.com', phone:'9876543211', department:'Computer Science', password:'teacher123' }],
+      teachers: [{ title:'Dr', first_name:'Sharma', last_name:'Ji', email:'sharma@college.com', phone:'9876543211', department:'Computer Science', password:'teacher123' }],
       fees: [{ roll_no:'BCA001', amount:15000, fee_type:'Tuition Fee', due_date:'2026-04-01' }],
     };
     const ws = XLSX.utils.json_to_sheet(templates[type]);
@@ -1132,7 +1152,13 @@ export default function AdminDashboard({ admin, onLogout }) {
       const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
       let success = 0, failed = 0;
       for (const row of rows) {
-        try { await API.post('/admin/teachers', { name: String(row.name||''), email: String(row.email||''), phone: String(row.phone||''), department: String(row.department||''), password: String(row.password||'teacher123') }); success++; }
+        try {
+          const fullName = String(row.name||'').trim();
+          const parts = fullName.split(/\s+/);
+          const first_name = parts[0] || '';
+          const last_name = parts.slice(1).join(' ') || '';
+          await API.post('/admin/teachers', { first_name, last_name, email: String(row.email||''), phone: String(row.phone||''), department: String(row.department||''), password: String(row.password||'teacher123') }); success++;
+        }
         catch { failed++; }
       }
       showMsg(`✅ Imported ${success}${failed?`, ❌ ${failed} failed`:''}`, failed?'warning':'success');
@@ -1344,7 +1370,13 @@ export default function AdminDashboard({ admin, onLogout }) {
             </div>
             <h3>Add Teacher Manually</h3>
             <form onSubmit={handleAddTeacher} style={styles.form}>
-              {['name','email','phone','department'].map(f=>(
+              <select style={styles.input} value={form.title||''} onChange={e=>setForm({...form,title:e.target.value})} required>
+                <option value="">Select Title</option>
+                {['Dr','Mr','Mrs','Ms','Prof'].map(t=><option key={t} value={t}>{t}</option>)}
+              </select>
+              <input style={styles.input} placeholder="First Name" value={form.first_name||''} onChange={e=>setForm({...form,first_name:e.target.value})} required />
+              <input style={styles.input} placeholder="Last Name" value={form.last_name||''} onChange={e=>setForm({...form,last_name:e.target.value})} required />
+              {['email','phone','department'].map(f=>(
                 <input key={f} style={styles.input} placeholder={f} value={form[f]||''} onChange={e=>setForm({...form,[f]:e.target.value})} required={f!=='phone'} />
               ))}
               <input style={styles.input} type="password" placeholder="password" value={form.password||''} onChange={e=>setForm({...form,password:e.target.value})} required />
@@ -1363,8 +1395,14 @@ export default function AdminDashboard({ admin, onLogout }) {
             <h3>All Teachers ({teachers.length})</h3>
             {editingTeacher && (
               <form onSubmit={handleUpdateTeacher} style={{...styles.form, background:'#fffbeb', border:'1px solid #f6e05e', marginBottom:'1rem'}}>
-                <strong style={{width:'100%',color:'#744210'}}>✏️ Editing: {editingTeacher.name}</strong>
-                {['name','email','phone','department'].map(f=>(
+                <strong style={{width:'100%',color:'#744210'}}>✏️ Editing: {editingTeacher.title} {editingTeacher.first_name} {editingTeacher.last_name}</strong>
+                <select style={styles.input} value={editingTeacher.title||''} onChange={e=>setEditingTeacher({...editingTeacher,title:e.target.value})} required>
+                  <option value="">Select Title</option>
+                  {['Dr','Mr','Mrs','Ms','Prof'].map(t=><option key={t} value={t}>{t}</option>)}
+                </select>
+                <input style={styles.input} placeholder="First Name" value={editingTeacher.first_name||''} onChange={e=>setEditingTeacher({...editingTeacher,first_name:e.target.value})} required />
+                <input style={styles.input} placeholder="Last Name" value={editingTeacher.last_name||''} onChange={e=>setEditingTeacher({...editingTeacher,last_name:e.target.value})} required />
+                {['email','phone','department'].map(f=>(
                   <input key={f} style={styles.input} placeholder={f} value={editingTeacher[f]||''}
                     onChange={e=>setEditingTeacher({...editingTeacher,[f]:e.target.value})} required={f!=='phone'} />
                 ))}
@@ -1400,7 +1438,11 @@ export default function AdminDashboard({ admin, onLogout }) {
                   </td>
                   <td style={styles.td}>
                     <button style={{...styles.addBtn,padding:'0.3rem 0.8rem',fontSize:'0.8rem',marginRight:'0.4rem'}}
-                      onClick={()=>{ setManagingTeacher(null); setEditingTeacher({...t}); }}>Edit</button>
+                      onClick={()=>{
+                        setManagingTeacher(null);
+                        const parts = (t.name||'').trim().split(/\s+/);
+                        setEditingTeacher({...t, first_name: t.first_name || parts[0] || '', last_name: t.last_name || parts.slice(1).join(' ') || ''});
+                      }}>Edit</button>
                     <button style={{...styles.addBtn,padding:'0.3rem 0.8rem',fontSize:'0.8rem',marginRight:'0.4rem',background:'#805ad5'}}
                       onClick={()=>openManageSubjects(t)}>Subjects</button>
                     <button style={styles.delBtn} onClick={()=>handleDelete('teachers',t.teacher_id)}>Delete</button>
@@ -1500,24 +1542,82 @@ export default function AdminDashboard({ admin, onLogout }) {
                                     <span style={{...styles.badge, background:'#9f7aea', fontSize:'0.72rem'}}>{s.category}</span>
                                   </td>
                                   <td style={{...styles.td, textAlign:'center'}}>{s.credits}</td>
-                                  <td style={{...styles.td, textAlign:'center'}}>
-                                    <button
-                                      onClick={() => handleToggleSubject(s.subject_id, assigned)}
-                                      style={{
-                                        padding:'0.3rem 0.8rem',
-                                        background: assigned ? '#e53e3e' : '#38a169',
-                                        color:'#fff', border:'none', borderRadius:'6px',
-                                        cursor:'pointer', fontWeight:'600', fontSize:'0.78rem',
-                                        whiteSpace:'nowrap'
-                                      }}>
-                                      {assigned ? '✕ Remove' : '+ Assign'}
-                                    </button>
+                                  <td style={{...styles.td, textAlign:'center', whiteSpace:'nowrap'}}>
+                                    {assigned ? (
+                                      <>
+                                        {(() => {
+                                          const asg = assignmentData.find(a => a.subject_id === s.subject_id);
+                                          return asg ? (
+                                            <span style={{fontSize:'0.72rem',color:'#718096',marginRight:'0.4rem',display:'inline-block',marginBottom:'0.2rem'}}>
+                                              Sec:{asg.section||'A'}{asg.programme_name ? ` | ${asg.programme_name}` : ''}{asg.class_name ? ` | ${asg.class_name}` : ''}
+                                            </span>
+                                          ) : null;
+                                        })()}
+                                        <button
+                                          onClick={() => {
+                                            const asg = assignmentData.find(a => a.subject_id === s.subject_id);
+                                            if (asg) setEditingAssignment({...asg});
+                                          }}
+                                          style={{padding:'0.3rem 0.6rem',background:'#dd6b20',color:'#fff',border:'none',borderRadius:'6px',cursor:'pointer',fontWeight:'600',fontSize:'0.78rem',marginRight:'0.3rem'}}>
+                                          ✏️ Edit
+                                        </button>
+                                        <button
+                                          onClick={() => handleToggleSubject(s.subject_id, true)}
+                                          style={{padding:'0.3rem 0.6rem',background:'#e53e3e',color:'#fff',border:'none',borderRadius:'6px',cursor:'pointer',fontWeight:'600',fontSize:'0.78rem'}}>
+                                          ✕ Remove
+                                        </button>
+                                      </>
+                                    ) : (
+                                      <button
+                                        onClick={() => handleToggleSubject(s.subject_id, false)}
+                                        style={{padding:'0.3rem 0.8rem',background:'#38a169',color:'#fff',border:'none',borderRadius:'6px',cursor:'pointer',fontWeight:'600',fontSize:'0.78rem',whiteSpace:'nowrap'}}>
+                                        + Assign
+                                      </button>
+                                    )}
                                   </td>
                                 </tr>
                               );
                             })}
                           </tbody>
                         </table>
+                        {editingAssignment && semSubjects.some(s => s.subject_id === editingAssignment.subject_id) && (
+                          <div style={{background:'#fffbeb', border:'1px solid #f6e05e', borderRadius:'0 0 8px 8px', padding:'1rem 1.25rem'}}>
+                            <strong style={{color:'#744210', fontSize:'0.9rem', display:'block', marginBottom:'0.6rem'}}>
+                              ✏️ Edit: {editingAssignment.subject_code} — {editingAssignment.subject_name}
+                            </strong>
+                            <div style={{display:'flex', gap:'0.8rem', flexWrap:'wrap', alignItems:'flex-end'}}>
+                              <div>
+                                <label style={{fontSize:'0.78rem',color:'#4a5568',fontWeight:'600',display:'block',marginBottom:'0.2rem'}}>Section</label>
+                                <input style={{...styles.input, width:'80px', margin:0}}
+                                  value={editingAssignment.section || 'A'}
+                                  onChange={e => setEditingAssignment({...editingAssignment, section: e.target.value})} />
+                              </div>
+                              <div>
+                                <label style={{fontSize:'0.78rem',color:'#4a5568',fontWeight:'600',display:'block',marginBottom:'0.2rem'}}>Programme</label>
+                                <select style={{...styles.input, width:'200px', margin:0}}
+                                  value={editingAssignment.programme_id || ''}
+                                  onChange={e => setEditingAssignment({...editingAssignment, programme_id: e.target.value ? parseInt(e.target.value) : null})}>
+                                  <option value="">— None —</option>
+                                  {programmes.map(p => <option key={p.programme_id} value={p.programme_id}>{p.programme_name}</option>)}
+                                </select>
+                              </div>
+                              <div>
+                                <label style={{fontSize:'0.78rem',color:'#4a5568',fontWeight:'600',display:'block',marginBottom:'0.2rem'}}>Class Name</label>
+                                <input style={{...styles.input, width:'150px', margin:0}} placeholder="e.g. 3rd Year"
+                                  value={editingAssignment.class_name || ''}
+                                  onChange={e => setEditingAssignment({...editingAssignment, class_name: e.target.value})} />
+                              </div>
+                              <button onClick={() => handleUpdateAssignment(editingAssignment)}
+                                style={{padding:'0.5rem 1.2rem',background:'#38a169',color:'#fff',border:'none',borderRadius:'6px',cursor:'pointer',fontWeight:'600',fontSize:'0.85rem'}}>
+                                💾 Save
+                              </button>
+                              <button onClick={() => setEditingAssignment(null)}
+                                style={{padding:'0.5rem 1rem',background:'#718096',color:'#fff',border:'none',borderRadius:'6px',cursor:'pointer',fontWeight:'600',fontSize:'0.85rem'}}>
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     );
                   })}

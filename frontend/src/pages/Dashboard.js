@@ -2,11 +2,22 @@ import React, { useState, useEffect } from 'react';
 import API from '../api';
 import StudentEnrollment from './StudentEnrollment';
 
-export default function Dashboard({ student, onLogout }) {
+export default function Dashboard({ student, onLogout, onStudentUpdate }) {
   const [activeTab, setActiveTab] = useState('overview');
   const [attendance, setAttendance] = useState([]);
   const [fees, setFees] = useState([]);
   const [marks, setMarks] = useState([]);
+  const [popup, setPopup] = useState(null);
+  const [msg, setMsg] = useState('');
+  const [msgType, setMsgType] = useState('success');
+  const [profileForm, setProfileForm] = useState({});
+  const [profileMsg, setProfileMsg] = useState('');
+
+  const showMsg = (text, type = 'success') => {
+    setMsg(text); setMsgType(type);
+    setPopup({ text, type });
+    setTimeout(() => { setMsg(''); setPopup(null); }, 4000);
+  };
   const [enrollmentSummary, setEnrollmentSummary] = useState(null);
   const [loading, setLoading] = useState(false);
   const [showEnrollment, setShowEnrollment] = useState(false);
@@ -23,6 +34,52 @@ export default function Dashboard({ student, onLogout }) {
   const fetchMarks = async () => {
     try { const r = await API.get(`/marks/student/${student.student_id}`); setMarks(r.data); }
     catch(e) {}
+  };
+
+  const printFeeReceipt = (fee) => {
+    const html = `
+      <html><head><title>Fee Receipt</title>
+      <style>
+        body { font-family: Arial, sans-serif; font-size: 13px; margin: 40px; color: #2d3748; }
+        .header { text-align: center; border-bottom: 3px double #2d3748; padding-bottom: 16px; margin-bottom: 20px; }
+        .header h1 { margin: 0 0 4px; font-size: 22px; } .header p { margin: 2px 0; color: #555; font-size: 12px; }
+        .receipt-no { display: flex; justify-content: space-between; margin-bottom: 20px; font-size: 12px; color: #555; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 24px; }
+        td { padding: 8px 12px; border: 1px solid #e2e8f0; }
+        td:first-child { font-weight: 600; background: #f7fafc; width: 35%; }
+        .amount-box { background: #f0fff4; border: 2px solid #48bb78; border-radius: 8px; padding: 16px; text-align: center; margin-bottom: 24px; }
+        .amount-box h2 { margin: 0; font-size: 28px; color: #276749; }
+        .amount-box p { margin: 4px 0 0; color: #555; font-size: 12px; }
+        .stamp { display: inline-block; border: 2px solid #48bb78; color: #48bb78; padding: 4px 16px; border-radius: 4px; font-weight: 700; font-size: 14px; transform: rotate(-5deg); margin-top: 8px; }
+        .footer { text-align: center; border-top: 1px solid #e2e8f0; padding-top: 12px; font-size: 11px; color: #718096; }
+        @media print { body { margin: 20px; } }
+      </style></head>
+      <body>
+        <div class="header"><h1>🎓 College ERP</h1><p>Fee Payment Receipt</p></div>
+        <div class="receipt-no">
+          <span><strong>Receipt No:</strong> ${fee.transaction_ref || 'TXN' + fee.fee_id}</span>
+          <span><strong>Date:</strong> ${fee.paid_date ? new Date(fee.paid_date).toLocaleDateString('en-IN',{day:'numeric',month:'long',year:'numeric'}) : new Date().toLocaleDateString('en-IN',{day:'numeric',month:'long',year:'numeric'})}</span>
+        </div>
+        <table>
+          <tr><td>Student Name</td><td>${student?.name||'—'}</td></tr>
+          <tr><td>Roll No</td><td>${student?.roll_no||'—'}</td></tr>
+          <tr><td>Fee Type</td><td>${fee.fee_type}</td></tr>
+          <tr><td>Due Date</td><td>${fee.due_date ? new Date(fee.due_date).toLocaleDateString('en-IN',{day:'numeric',month:'long',year:'numeric'}) : '—'}</td></tr>
+          <tr><td>Payment Date</td><td>${fee.paid_date ? new Date(fee.paid_date).toLocaleDateString('en-IN',{day:'numeric',month:'long',year:'numeric'}) : '—'}</td></tr>
+          <tr><td>Status</td><td><strong style="color:#276749">PAID</strong></td></tr>
+        </table>
+        <div class="amount-box">
+          <h2>₹${Number(fee.amount).toLocaleString('en-IN')}</h2>
+          <p>Amount Paid</p>
+          <div class="stamp">✓ PAID</div>
+        </div>
+        <div class="footer">
+          <p>This is a computer-generated receipt and does not require a signature.</p>
+          <p>Generated on ${new Date().toLocaleDateString('en-IN',{day:'numeric',month:'long',year:'numeric'})}</p>
+        </div>
+      </body></html>`;
+    const w = window.open('', '_blank');
+    if (w) { w.document.write(html); w.document.close(); w.focus(); setTimeout(() => w.print(), 500); }
   };
 
   const fetchFees = async () => {
@@ -60,9 +117,11 @@ export default function Dashboard({ student, onLogout }) {
   const totalPresent = attendance.filter(a => a.status==='PRESENT').length;
   const overallPct = totalClasses ? ((totalPresent/totalClasses)*100).toFixed(1) : 0;
 
-  // Derive from live API data — don't trust stale localStorage student object
-  const isEnrollmentSubmitted = student.enrollment_submitted === 1
-    || (enrollmentSummary && enrollmentSummary.some(e => e.is_draft === 0 && e.status !== 'PENDING'));
+  // Only use live API data — never trust stale localStorage student object
+  const isEnrollmentSubmitted = enrollmentSummary !== null
+    && enrollmentSummary.some(e => e.is_draft === 0 && e.status !== 'PENDING');
+  const isProfileIncomplete = !student?.email || !student?.phone;
+  const missingFields = [!student?.email && 'email', !student?.phone && 'mobile number'].filter(Boolean);
   const acceptedSubjects = enrollmentSummary 
     ? enrollmentSummary.filter(e => e.status === 'ACCEPTED' && e.is_draft === 0) 
     : [];
@@ -123,6 +182,14 @@ export default function Dashboard({ student, onLogout }) {
 
   return (
     <div style={styles.container}>
+      {popup && (
+        <div style={{position:'fixed',top:0,left:0,width:'100%',height:'100%',display:'flex',alignItems:'center',justifyContent:'center',zIndex:9999,pointerEvents:'none'}}>
+          <div style={{background:popup.type==='error'?'#e53e3e':popup.type==='warning'?'#ed8936':'#38a169',color:'#fff',padding:'1.25rem 2rem',borderRadius:'14px',boxShadow:'0 8px 32px rgba(0,0,0,0.25)',fontSize:'1rem',fontWeight:'700',maxWidth:'420px',textAlign:'center',animation:'popupFade 0.3s ease'}}>
+            {popup.text}
+          </div>
+        </div>
+      )}
+      <style>{'@keyframes popupFade { from { opacity:0; transform:scale(0.85); } to { opacity:1; transform:scale(1); } }'}</style>
       <nav style={styles.nav}>
         <h2 style={styles.navTitle}>🎓 College ERP</h2>
         <div style={styles.navRight}>
@@ -132,10 +199,24 @@ export default function Dashboard({ student, onLogout }) {
       </nav>
 
       <div style={styles.tabs}>
-        {['overview','subjects','attendance','fees','marks'].map(tab => (
+        {/* Profile completion banner */}
+        {isProfileIncomplete && (
+          <div style={{background:'#fffbeb',border:'2px solid #f6e05e',borderRadius:'10px',padding:'0.85rem 1.25rem',marginBottom:'1rem',display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:'0.5rem'}}>
+            <div>
+              <span style={{fontWeight:'700',color:'#92400e'}}>⚠️ Complete your profile</span>
+              <span style={{color:'#92400e',fontSize:'0.85rem',marginLeft:'0.5rem'}}>Please add your {missingFields.join(' and ')}.</span>
+            </div>
+            <button onClick={()=>setActiveTab('profile')}
+              style={{padding:'0.4rem 1rem',background:'#d97706',color:'#fff',border:'none',borderRadius:'6px',cursor:'pointer',fontWeight:'600',fontSize:'0.85rem'}}>
+              👤 Update Profile
+            </button>
+          </div>
+        )}
+
+        {['overview','subjects','attendance','fees','marks','profile'].map(tab => (
           <button key={tab} style={{...styles.tab, ...(activeTab===tab?styles.activeTab:{})}}
             onClick={() => setActiveTab(tab)}>
-            {tab==='overview'?'🏠 Overview':tab==='subjects'?'📚 My Subjects':tab==='attendance'?'📅 Attendance':tab==='fees'?'💰 Fees':'📊 Marks'}
+            {tab==='overview'?'🏠 Overview':tab==='subjects'?'📚 My Subjects':tab==='attendance'?'📅 Attendance':tab==='fees'?'💰 Fees':tab==='marks'?'📊 Marks':'👤 Profile'}
           </button>
         ))}
       </div>
@@ -434,6 +515,113 @@ export default function Dashboard({ student, onLogout }) {
           </div>
         )}
 
+        {activeTab === 'profile' && (
+          <div>
+            <div style={{background:'#fff',borderRadius:'12px',padding:'1.5rem',marginBottom:'1.5rem',boxShadow:'0 2px 8px rgba(0,0,0,0.08)'}}>
+              <h2 style={{margin:'0 0 0.25rem'}}>👤 My Profile</h2>
+              <p style={{margin:'0 0 1.5rem',color:'#718096',fontSize:'0.85rem'}}>Update your personal information and password</p>
+
+              {profileMsg && (
+                <div style={{padding:'0.75rem 1rem',borderRadius:'8px',marginBottom:'1rem',
+                  background: profileMsg.includes('✅') ? '#f0fff4' : '#fff5f5',
+                  color: profileMsg.includes('✅') ? '#276749' : '#c53030',
+                  fontWeight:'600',fontSize:'0.85rem'}}>
+                  {profileMsg}
+                </div>
+              )}
+
+              {/* Basic Info */}
+              <div style={{marginBottom:'1.5rem'}}>
+                <h3 style={{margin:'0 0 1rem',fontSize:'1rem',color:'#2d3748',borderBottom:'2px solid #e2e8f0',paddingBottom:'0.5rem'}}>Basic Information</h3>
+                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'1rem'}}>
+                  {[
+                    {label:'Roll No',    value:student?.roll_no,        readonly:true},
+                    {label:'Programme',  value:student?.programme_name, readonly:true},
+                    {label:'Semester',   value:student?.semester,       readonly:true},
+                    {label:'Level',      value:student?.level_name,     readonly:true},
+                  ].map(f=>(
+                    <div key={f.label}>
+                      <label style={{display:'block',fontSize:'0.8rem',fontWeight:'600',color:'#4a5568',marginBottom:'0.3rem'}}>{f.label}</label>
+                      <input value={f.value||''} readOnly
+                        style={{width:'100%',padding:'0.6rem 0.8rem',border:'1.5px solid #e2e8f0',borderRadius:'6px',fontSize:'0.9rem',background:'#f7fafc',color:'#718096',boxSizing:'border-box'}} />
+                    </div>
+                  ))}
+                  <div>
+                    <label style={{display:'block',fontSize:'0.8rem',fontWeight:'600',color:'#4a5568',marginBottom:'0.3rem'}}>Full Name</label>
+                    <input value={profileForm.name ?? student?.name ?? ''} onChange={e=>setProfileForm({...profileForm,name:e.target.value})}
+                      style={{width:'100%',padding:'0.6rem 0.8rem',border:'1.5px solid #e2e8f0',borderRadius:'6px',fontSize:'0.9rem',boxSizing:'border-box'}} />
+                  </div>
+                  <div>
+                    <label style={{display:'block',fontSize:'0.8rem',fontWeight:'600',color:'#4a5568',marginBottom:'0.3rem'}}>Email</label>
+                    <input type="email" value={profileForm.email ?? student?.email ?? ''} onChange={e=>setProfileForm({...profileForm,email:e.target.value})}
+                      placeholder="your@email.com"
+                      style={{width:'100%',padding:'0.6rem 0.8rem',border:'1.5px solid #e2e8f0',borderRadius:'6px',fontSize:'0.9rem',boxSizing:'border-box'}} />
+                  </div>
+                  <div>
+                    <label style={{display:'block',fontSize:'0.8rem',fontWeight:'600',color:'#4a5568',marginBottom:'0.3rem'}}>Phone</label>
+                    <input type="tel" value={profileForm.phone ?? student?.phone ?? ''} onChange={e=>setProfileForm({...profileForm,phone:e.target.value})}
+                      placeholder="10-digit mobile number"
+                      style={{width:'100%',padding:'0.6rem 0.8rem',border:'1.5px solid #e2e8f0',borderRadius:'6px',fontSize:'0.9rem',boxSizing:'border-box'}} />
+                  </div>
+                </div>
+                <button onClick={async()=>{
+                  try {
+                    const updated = {
+                      name:  profileForm.name  !== undefined ? profileForm.name  : student.name,
+                      email: profileForm.email !== undefined ? profileForm.email : student.email,
+                      phone: profileForm.phone !== undefined ? profileForm.phone : student.phone,
+                    };
+                    await API.put(`/students/${student.student_id}/profile`, updated);
+                    // Update student object in parent so banner disappears
+                    if (onStudentUpdate) onStudentUpdate({ ...student, ...updated });
+                    showMsg('✅ Profile updated successfully!');
+                    if (onStudentUpdate) onStudentUpdate(updated);
+                    setProfileForm({});
+                    
+                  } catch(e) { showMsg(e.response?.data?.error||'Update failed', 'error'); }
+                }} style={{marginTop:'1rem',padding:'0.65rem 1.5rem',background:'#4c51bf',color:'#fff',border:'none',borderRadius:'8px',cursor:'pointer',fontWeight:'600'}}>
+                  💾 Save Profile
+                </button>
+              </div>
+
+              {/* Change Password */}
+              <div>
+                <h3 style={{margin:'0 0 1rem',fontSize:'1rem',color:'#2d3748',borderBottom:'2px solid #e2e8f0',paddingBottom:'0.5rem'}}>🔐 Change Password</h3>
+                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:'1rem'}}>
+                  {[
+                    {label:'Current Password', key:'current_password', placeholder:'Enter current password'},
+                    {label:'New Password',      key:'new_password',     placeholder:'Enter new password'},
+                    {label:'Confirm Password',  key:'confirm_password', placeholder:'Confirm new password'},
+                  ].map(f=>(
+                    <div key={f.key}>
+                      <label style={{display:'block',fontSize:'0.8rem',fontWeight:'600',color:'#4a5568',marginBottom:'0.3rem'}}>{f.label}</label>
+                      <input type="password" value={profileForm[f.key]||''} onChange={e=>setProfileForm({...profileForm,[f.key]:e.target.value})}
+                        placeholder={f.placeholder}
+                        style={{width:'100%',padding:'0.6rem 0.8rem',border:'1.5px solid #e2e8f0',borderRadius:'6px',fontSize:'0.9rem',boxSizing:'border-box'}} />
+                    </div>
+                  ))}
+                </div>
+                <button onClick={async()=>{
+                  if (!profileForm.current_password || !profileForm.new_password) { showMsg('Please fill all password fields', 'error'); return; }
+                  if (profileForm.new_password !== profileForm.confirm_password) { showMsg('New passwords do not match', 'error'); return; }
+                  if (profileForm.new_password.length < 6) { showMsg('Password must be at least 6 characters', 'error'); return; }
+                  try {
+                    await API.put(`/students/${student.student_id}/profile`, {
+                      current_password: profileForm.current_password,
+                      new_password: profileForm.new_password
+                    });
+                    showMsg('✅ Password changed successfully!');
+                    setProfileForm({...profileForm, current_password:'', new_password:'', confirm_password:''});
+                    
+                  } catch(e) { showMsg(e.response?.data?.error||'Password change failed', 'error'); }
+                }} style={{marginTop:'1rem',padding:'0.65rem 1.5rem',background:'#e53e3e',color:'#fff',border:'none',borderRadius:'8px',cursor:'pointer',fontWeight:'600'}}>
+                  🔐 Change Password
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {activeTab === 'fees' && (
           <div>
             <div style={{background:'#fff',borderRadius:'12px',padding:'1.5rem',marginBottom:'1.5rem',boxShadow:'0 2px 8px rgba(0,0,0,0.08)'}}>
@@ -456,7 +644,7 @@ export default function Dashboard({ student, onLogout }) {
               <div style={styles.emptyState}>💰 No fee records found.</div>
             ) : (
               <table style={styles.table}>
-                <thead><tr>{['Fee Type','Amount','Due Date','Paid Date','Status','Ref No'].map(h=><th key={h} style={styles.th}>{h}</th>)}</tr></thead>
+                <thead><tr>{['Fee Type','Amount','Due Date','Paid Date','Status','Ref No','Receipt'].map(h=><th key={h} style={styles.th}>{h}</th>)}</tr></thead>
                 <tbody>{fees.map(f=>(
                   <tr key={f.fee_id} style={{background:f.status==='OVERDUE'?'#fff5f5':f.status==='PAID'?'#f0fff4':'#fff'}}>
                     <td style={styles.td}><strong>{f.fee_type}</strong></td>
@@ -470,6 +658,14 @@ export default function Dashboard({ student, onLogout }) {
                       </span>
                     </td>
                     <td style={{...styles.td,fontFamily:'monospace',fontSize:'0.8rem',color:'#718096'}}>{f.transaction_ref||'—'}</td>
+                    <td style={styles.td}>
+                      {f.status==='PAID' && (
+                        <button onClick={()=>printFeeReceipt(f)}
+                          style={{padding:'0.25rem 0.7rem',background:'#4c51bf',color:'#fff',border:'none',borderRadius:'5px',cursor:'pointer',fontSize:'0.75rem',fontWeight:'600'}}>
+                          🧾 Receipt
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 ))}</tbody>
               </table>

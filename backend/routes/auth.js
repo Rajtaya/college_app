@@ -28,6 +28,12 @@ router.post('/student/login', async (req, res) => {
       { expiresIn: '1d' }
     );
     const { password: _, ...studentData } = rows[0];
+    // Add combined name field for frontend compatibility
+    studentData.name = `${studentData.first_name} ${studentData.last_name}`;
+    // Add course field for frontend compatibility (uses programme_name)
+    studentData.course = studentData.programme_name;
+    // Add year field for frontend compatibility (uses study_year)
+    studentData.year = studentData.study_year;
     res.json({ token, student: studentData });
   } catch (err) {
     console.error(err);
@@ -40,7 +46,13 @@ router.post('/teacher/login', async (req, res) => {
   if (!email || !password)
     return res.status(400).json({ error: 'Email and password are required' });
   try {
-    const [rows] = await db.query('SELECT * FROM teachers WHERE email = ?', [email]);
+    const [rows] = await db.query(
+      `SELECT t.*, 
+              CONCAT(t.first_name, ' ', t.last_name) AS name
+       FROM teachers t
+       WHERE t.email = ?`,
+      [email]
+    );
     if (!rows.length) return res.status(401).json({ error: 'Invalid credentials' });
     const valid = await bcrypt.compare(password, rows[0].password);
     if (!valid) return res.status(401).json({ error: 'Invalid credentials' });

@@ -81,7 +81,7 @@ router.get('/subject/:subject_id/date/:date', async (req, res) => {
   try {
     const [rows] = await db.query(
       `SELECT a.attendance_id, a.student_id, a.status,
-              st.name, st.roll_no
+              CONCAT(st.first_name, ' ', st.last_name) AS name, st.roll_no
        FROM attendance a
        JOIN students st ON a.student_id = st.student_id
        WHERE a.subject_id = ? AND a.date = ?
@@ -92,6 +92,34 @@ router.get('/subject/:subject_id/date/:date', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// GET /student/:student_id/detailed — Attendance summary using view (includes LEAVE + defaulter status)
+router.get('/student/:student_id/detailed', async (req, res) => {
+  try {
+    const { semester, academic_year_id } = req.query;
+    let query = 'SELECT * FROM vw_student_attendance_summary WHERE student_id = ?';
+    const params = [req.params.student_id];
+    if (semester)         { query += ' AND semester = ?';          params.push(semester); }
+    if (academic_year_id) { query += ' AND academic_year_id = ?';  params.push(academic_year_id); }
+    query += ' ORDER BY subject_name';
+    const [rows] = await db.query(query, params);
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /defaulters — Students with attendance < 75% (admin/teacher only)
+router.get('/defaulters', verify('teacher', 'admin'), async (req, res) => {
+  try {
+    const { semester, academic_year_id } = req.query;
+    let query = 'SELECT * FROM vw_defaulter_list WHERE 1=1';
+    const params = [];
+    if (semester)         { query += ' AND semester = ?';          params.push(semester); }
+    if (academic_year_id) { query += ' AND academic_year_id = ?';  params.push(academic_year_id); }
+    query += ' ORDER BY attendance_percentage ASC';
+    const [rows] = await db.query(query, params);
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // PUT /:attendance_id — Update attendance status
