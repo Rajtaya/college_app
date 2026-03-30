@@ -572,13 +572,11 @@ export default function Dashboard({ student, onLogout, onStudentUpdate }) {
                       phone: profileForm.phone !== undefined ? profileForm.phone : student.phone,
                     };
                     await API.put(`/students/${student.student_id}/profile`, updated);
-                    // Update student object in parent so banner disappears
                     if (onStudentUpdate) onStudentUpdate({ ...student, ...updated });
-                    showMsg('✅ Profile updated successfully!');
-                    if (onStudentUpdate) onStudentUpdate(updated);
+                    setProfileMsg('✅ Profile updated successfully!');
                     setProfileForm({});
                     
-                  } catch(e) { showMsg(e.response?.data?.error||'Update failed', 'error'); }
+                  } catch(e) { setProfileMsg(e.response?.data?.error||'Update failed'); }
                 }} style={{marginTop:'1rem',padding:'0.65rem 1.5rem',background:'#4c51bf',color:'#fff',border:'none',borderRadius:'8px',cursor:'pointer',fontWeight:'600'}}>
                   💾 Save Profile
                 </button>

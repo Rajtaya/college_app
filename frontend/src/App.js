@@ -26,9 +26,15 @@ export default function App() {
     setStudent(null); setAdmin(null); setTeacher(null);
   };
 
+  const handleStudentUpdate = (updatedData) => {
+    const updated = { ...student, ...updatedData };
+    setStudent(updated);
+    localStorage.setItem('student', JSON.stringify(updated));
+  };
+
   if (mode === 'admin' && admin) return <AdminDashboard admin={admin} onLogout={handleLogout} />;
   if (mode === 'teacher' && teacher) return <TeacherDashboard teacher={teacher} onLogout={handleLogout} />;
-  if (mode === 'student' && student) return <Dashboard student={student} onLogout={handleLogout} />;
+  if (mode === 'student' && student) return <Dashboard student={student} onLogout={handleLogout} onStudentUpdate={handleStudentUpdate} />;
 
   return (
     <div>
