@@ -119,11 +119,11 @@ export default function Dashboard({ student, onLogout, onStudentUpdate }) {
 
   // Only use live API data — never trust stale localStorage student object
   const isEnrollmentSubmitted = enrollmentSummary !== null
-    && enrollmentSummary.some(e => e.is_draft === 0 && e.status !== 'PENDING');
+    && enrollmentSummary.some(e => e.is_draft === 0 && e.status !== 'PENDING' && !e.admin_modified);
   const isProfileIncomplete = !student?.email || !student?.phone;
   const missingFields = [!student?.email && 'email', !student?.phone && 'mobile number'].filter(Boolean);
   const acceptedSubjects = enrollmentSummary 
-    ? enrollmentSummary.filter(e => e.status === 'ACCEPTED' && e.is_draft === 0) 
+        ? enrollmentSummary.filter(e => e.status === 'ACCEPTED')
     : [];
   const hasDraft = enrollmentSummary && enrollmentSummary.some(e => e.is_draft === 1);
   const adminModified = enrollmentSummary && enrollmentSummary.some(e => e.admin_modified === 1);
