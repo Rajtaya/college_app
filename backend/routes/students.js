@@ -157,7 +157,19 @@ router.put('/:id/profile',
         [fName, lName, email || student.email, phone || student.phone, req.params.id]
       );
     }
-    res.json({ message: 'Profile updated successfully' });
+    // Return fresh student data so frontend always reflects actual DB state
+    const [updated] = await db.query(
+      `SELECT s.*, l.level_name, p.programme_name, f.faculty_name
+       FROM students s
+       LEFT JOIN levels l ON s.level_id = l.level_id
+       LEFT JOIN programmes p ON s.programme_id = p.programme_id
+       LEFT JOIN faculties f ON s.faculty_id = f.faculty_id
+       WHERE s.student_id = ?`,
+      [req.params.id]
+    );
+    const { password: _p, ...updatedStudent } = updated[0];
+    updatedStudent.name = `${updatedStudent.first_name} ${updatedStudent.last_name}`;
+    res.json({ message: 'Profile updated successfully', student: updatedStudent });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

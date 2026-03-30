@@ -27,9 +27,9 @@ export default function App() {
   };
 
   const handleStudentUpdate = (updatedData) => {
-    const updated = { ...student, ...updatedData };
-    setStudent(updated);
-    localStorage.setItem('student', JSON.stringify(updated));
+    const merged = { ...student, ...updatedData };
+    setStudent(merged);
+    localStorage.setItem('student', JSON.stringify(merged));
   };
 
   if (mode === 'admin' && admin) return <AdminDashboard admin={admin} onLogout={handleLogout} />;

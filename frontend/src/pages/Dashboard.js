@@ -571,8 +571,8 @@ export default function Dashboard({ student, onLogout, onStudentUpdate }) {
                       email: profileForm.email !== undefined ? profileForm.email : student.email,
                       phone: profileForm.phone !== undefined ? profileForm.phone : student.phone,
                     };
-                    await API.put(`/students/${student.student_id}/profile`, updated);
-                    if (onStudentUpdate) onStudentUpdate({ ...student, ...updated });
+                    const res = await API.put(`/students/${student.student_id}/profile`, updated);
+                    if (onStudentUpdate) onStudentUpdate(res.data.student);
                     setProfileMsg('✅ Profile updated successfully!');
                     setProfileForm({});
                     
