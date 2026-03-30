@@ -225,8 +225,9 @@ router.post('/save-draft/:student_id', verify('student', 'admin'), async (req, r
     );
     if (!studentRows.length) return res.status(404).json({ error: 'Student not found' });
     // Check for non-draft submitted records instead of relying on flag
+    // Exclude admin-modified records — those shouldn't lock student enrollment
     const [submittedCheck] = await db.query(
-      'SELECT COUNT(*) as count FROM student_subject_enrollment WHERE student_id = ? AND is_draft = 0',
+      'SELECT COUNT(*) as count FROM student_subject_enrollment WHERE student_id = ? AND is_draft = 0 AND admin_modified = 0',
       [req.params.student_id]
     );
     if (submittedCheck[0].count > 0)
@@ -260,9 +261,9 @@ router.post('/submit/:student_id', verify('student', 'admin'), async (req, res) 
     const scheme = student.scheme || 'A';
     const sem    = student.semester;
 
-    // Block re-submission — only block if finalized (non-draft) records exist
+    // Block re-submission — only block if student has already submitted (not admin-modified)
     const [existing] = await db.query(
-      'SELECT COUNT(*) AS count FROM student_subject_enrollment WHERE student_id = ? AND is_draft = 0',
+      'SELECT COUNT(*) AS count FROM student_subject_enrollment WHERE student_id = ? AND is_draft = 0 AND admin_modified = 0',
       [req.params.student_id]
     );
     if (existing[0].count > 0) {
@@ -544,12 +545,20 @@ router.post('/submit/:student_id', verify('student', 'admin'), async (req, res) 
 
     // ── Save ──────────────────────────────────────────────────────────────────
     // Delete all draft records (both PENDING and ACCEPTED drafts) before final save
+    // But preserve admin-modified records
     await db.query(
-      'DELETE FROM student_subject_enrollment WHERE student_id = ? AND is_draft = 1',
+      'DELETE FROM student_subject_enrollment WHERE student_id = ? AND is_draft = 1 AND admin_modified = 0',
       [req.params.student_id]
     );
 
     for (const e of enrollments) {
+      // Skip subjects already set by admin — don't overwrite admin decisions
+      const [adminCheck] = await db.query(
+        'SELECT admin_modified FROM student_subject_enrollment WHERE student_id = ? AND subject_id = ? AND admin_modified = 1',
+        [req.params.student_id, e.subject_id]
+      );
+      if (adminCheck.length > 0) continue;
+
       await db.query(
         `INSERT INTO student_subject_enrollment
            (student_id, subject_id, status, is_major, remarks, is_draft)

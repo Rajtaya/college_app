@@ -569,7 +569,7 @@ router.put('/enrollment/bulkupdate/:student_id', async (req, res) => {
     for (const change of changes) {
       const [existing] = await db.query('SELECT * FROM student_subject_enrollment WHERE student_id = ? AND subject_id = ?', [req.params.student_id, change.subject_id]);
       if (existing.length) {
-        await db.query('UPDATE student_subject_enrollment SET status = ?, admin_modified = 1, admin_note = ? WHERE student_id = ? AND subject_id = ?', [change.status, admin_note || '', req.params.student_id, change.subject_id]);
+        await db.query('UPDATE student_subject_enrollment SET status = ?, admin_modified = 1, is_draft = 0, admin_note = ? WHERE student_id = ? AND subject_id = ?', [change.status, admin_note || '', req.params.student_id, change.subject_id]);
       } else {
         await db.query('INSERT INTO student_subject_enrollment (student_id, subject_id, status, admin_modified, admin_note, is_draft) VALUES (?, ?, ?, 1, ?, 0)', [req.params.student_id, change.subject_id, change.status, admin_note || 'Added by admin']);
       }
