@@ -88,7 +88,7 @@ export default function StudentEnrollment({ student, onBack }) {
       ]);
       setSubjects(subRes.data);
       // Only use live enrollment data — never trust stale localStorage
-      const hasNonDraft = enrollRes.data.some(e => e.is_draft === 0 && e.status !== 'PENDING');
+     const hasNonDraft = enrollRes.data.some(e => e.is_draft === 0 && e.status !== 'PENDING' && !e.admin_modified);
       setSubmitted(hasNonDraft);
 
       const enrollState = {};
@@ -143,6 +143,8 @@ export default function StudentEnrollment({ student, onBack }) {
     if (submitted) return;
     const sub = subjects.find(s => s.subject_id === subject_id);
     if (!sub || isFixedSubject(sub.category)) return;
+    // Block changes to admin-assigned subjects
+    if (sub.admin_modified && sub.enrollment_status === 'ACCEPTED') return;
 
     setEnrollments(prev => {
       const updated = { ...prev, [subject_id]: { ...prev[subject_id], status: newStatus } };

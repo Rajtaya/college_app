@@ -121,7 +121,7 @@ router.get('/subjects/:student_id', async (req, res) => {
                   s.level_id, s.programme_id, s.faculty_id,
                   s.discipline_id, s.is_common, d.discipline_name,
                   e.enrollment_id, e.status AS enrollment_status,
-                  e.is_major, e.remarks
+                  e.is_major, e.remarks, e.admin_modified
            FROM subjects s
            JOIN programme_subject_pool psp
              ON s.subject_id = psp.subject_id AND psp.programme_id = ?
@@ -135,7 +135,7 @@ router.get('/subjects/:student_id', async (req, res) => {
                   s.level_id, s.programme_id, s.faculty_id,
                   s.discipline_id, s.is_common, d.discipline_name,
                   e.enrollment_id, e.status AS enrollment_status,
-                  e.is_major, e.remarks
+                  e.is_major, e.remarks, e.admin_modified
            FROM subjects s
            LEFT JOIN disciplines d ON s.discipline_id = d.discipline_id
            LEFT JOIN student_subject_enrollment e

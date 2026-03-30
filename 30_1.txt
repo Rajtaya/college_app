@@ -1,0 +1,5 @@
+36:  const [assignmentData, setAssignmentData] = useState([]);
+37:  const [editingAssignment, setEditingAssignment] = useState(null);
+1564:                                          const asg = assignmentData.find(a => a.subject_id === s.subject_id);
+1573:                                            const asg = assignmentData.find(a => a.subject_id === s.subject_id);
+1598:                        {editingAssignment && semSubjects.some(s => s.subject_id === editingAssignment.subject_id) && (
