@@ -813,10 +813,25 @@ export default function AdminDashboard({ admin, onLogout }) {
   const handleEnrollStatusChange = (subject_id, newStatus) => {
     setEnrollmentDetail(prev => {
       let updated = prev.map(s => s.subject_id === subject_id ? { ...s, status: newStatus } : s);
-      // Auto-sync T/P pair
       const sub = prev.find(s => s.subject_id === subject_id);
+      // Auto-sync T/P pair
       if (sub && sub.pair_code) {
         updated = updated.map(s => s.subject_code.trim() === sub.pair_code.trim() ? { ...s, status: newStatus } : s);
+      }
+      // Auto-reject other subjects in single-select categories when accepting
+      if (newStatus === 'ACCEPTED' && sub) {
+        const singleSelectCats = ['MDC', 'MIC', 'VAC', 'AEC'];
+        if (singleSelectCats.includes(sub.category)) {
+          // Get the paired practical code for the newly accepted subject
+          const acceptedCodes = new Set([sub.subject_code.trim()]);
+          if (sub.pair_code) acceptedCodes.add(sub.pair_code.trim());
+          updated = updated.map(s => {
+            if (s.category === sub.category && !acceptedCodes.has(s.subject_code.trim()) && s.status === 'ACCEPTED') {
+              return { ...s, status: 'REJECTED' };
+            }
+            return s;
+          });
+        }
       }
       // Run validation on the updated detail directly
       runValidationOn(updated);
