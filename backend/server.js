@@ -1,20 +1,47 @@
 const express = require('express');
-const cors = require('cors');
-const helmet = require('helmet');
+const cors    = require('cors');
+const helmet  = require('helmet');
 const rateLimit = require('express-rate-limit');
+const path    = require('path');
 require('dotenv').config();
 
-const app = express();
+const app  = express();
+const isProd = process.env.NODE_ENV === 'production';
 
-app.set('trust proxy', 1);
-app.use(helmet());
-app.use(cors({
-  origin: ['https://amazing-wisp-16aa99.netlify.app', 'https://college-erp-frontend-production.up.railway.app', 'http://localhost:3000', 'http://localhost:3001'],
-  methods: ['GET', 'POST', 'PUT', 'DELETE'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+// ── Trust proxy ──────────────────────────────────────────────────────────────
+// Set to the exact number of trusted proxies in front of this server.
+// '1' = one reverse proxy (Railway / Render / Nginx). Change to 0 for direct.
+app.set('trust proxy', isProd ? 1 : false);
+
+// ── Security headers (Helmet) ────────────────────────────────────────────────
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'none'"],
+      // This is a pure API — block all resource loads from any HTML error pages
+    },
+  },
+  crossOriginEmbedderPolicy: false, // not needed for API
 }));
-app.use(express.json({ limit: '5mb' }));
 
+// ── CORS — environment-aware whitelist ───────────────────────────────────────
+const prodOrigins = [
+  'https://amazing-wisp-16aa99.netlify.app',
+  'https://college-erp-frontend-production.up.railway.app',
+];
+const devOrigins  = ['http://localhost:3001', 'http://localhost:5173'];
+
+app.use(cors({
+  origin: isProd ? prodOrigins : [...prodOrigins, ...devOrigins],
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+}));
+
+// ── Body parsing ─────────────────────────────────────────────────────────────
+app.use(express.json({ limit: '2mb' }));
+app.use(express.urlencoded({ extended: true, limit: '2mb' }));
+
+// ── Rate limiters ────────────────────────────────────────────────────────────
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 10,
@@ -22,10 +49,23 @@ const loginLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
 });
+
+// Global limiter — 120 req/min per IP for all authenticated API calls
+const globalLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 120,
+  message: { error: 'Too many requests. Please slow down.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) => req.path.includes('/login'), // login has its own stricter limiter
+});
+
 app.use('/api/auth/student/login', loginLimiter);
 app.use('/api/auth/teacher/login', loginLimiter);
-app.use('/api/admin/login', loginLimiter);
+app.use('/api/admin/login',        loginLimiter);
+app.use('/api', globalLimiter);
 
+// ── Routes ───────────────────────────────────────────────────────────────────
 app.use('/api/auth',        require('./routes/auth'));
 app.use('/api/students',    require('./routes/students'));
 app.use('/api/attendance',  require('./routes/attendance'));
@@ -38,12 +78,30 @@ app.use('/api/programmes',  require('./routes/programmes'));
 app.use('/api/faculties',   require('./routes/faculties'));
 app.use('/api/enrollment',  require('./routes/enrollment'));
 app.use('/api/disciplines', require('./routes/disciplines'));
+app.use('/api/departments', require('./routes/departments'));
+app.use('/api/notifications', require('./routes/notifications'));
 
+// Serve uploaded files (notifications attachments)
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+// ── Global error handler ─────────────────────────────────────────────────────
 app.use((err, req, res, next) => {
-  console.error("GLOBAL ERROR:", err.message, err.stack);
+  // Log structured error — never expose stack in response
+  console.error(JSON.stringify({
+    level: 'error',
+    path: req.path,
+    method: req.method,
+    message: err.message,
+    // stack only in dev
+    ...(isProd ? {} : { stack: err.stack }),
+  }));
   res.status(500).json({ error: 'Internal server error' });
 });
 
 app.listen(process.env.PORT || 3000, () => {
-  console.log(`Server running on port ${process.env.PORT || 3000}`);
+  console.log(JSON.stringify({
+    level: 'info',
+    message: `Server running on port ${process.env.PORT || 3000}`,
+    env: process.env.NODE_ENV || 'development',
+  }));
 });

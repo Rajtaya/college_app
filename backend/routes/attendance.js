@@ -2,51 +2,63 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db');
 const { verify } = require('../middleware/auth');
+const { assertTeacherOwnsSubject } = require('../middleware/subjectAuth');
 
 router.use(verify());
 
-const ownOrStaff = (req, res, next) => {
-  if (req.user.role === 'student' && req.user.id !== parseInt(req.params.student_id)) {
-    return res.status(403).json({ error: 'Forbidden' });
-  }
-  next();
-};
+const VALID_STATUSES = new Set(['PRESENT', 'ABSENT', 'LEAVE']);
 
 // POST / — Mark single attendance (upsert)
 router.post('/', verify('teacher', 'admin'), async (req, res) => {
   const { student_id, subject_id, date, status } = req.body;
+  if (!VALID_STATUSES.has((status || '').toUpperCase()))
+    return res.status(400).json({ error: `Invalid status. Must be one of: ${[...VALID_STATUSES].join(', ')}` });
   try {
+    if (!await assertTeacherOwnsSubject(req, res, subject_id)) return;
     const [result] = await db.query(
       'INSERT INTO attendance (student_id, subject_id, date, status) VALUES (?,?,?,?) ON DUPLICATE KEY UPDATE status=VALUES(status)',
-      [student_id, subject_id, date, status]
+      [student_id, subject_id, date, status.toUpperCase()]
     );
     res.json({ message: 'Attendance marked', attendance_id: result.insertId });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error(err); res.status(500).json({ error: 'Internal server error' });
   }
 });
 
 // POST /bulk — Mark attendance for a whole class on a date
 router.post('/bulk', verify('teacher', 'admin'), async (req, res) => {
   const { subject_id, date, records } = req.body;
-  if (!Array.isArray(records) || records.length === 0) {
+  if (!Array.isArray(records) || records.length === 0)
     return res.status(400).json({ error: 'records must be a non-empty array' });
-  }
+  if (!subject_id || !date)
+    return res.status(400).json({ error: 'subject_id and date are required' });
+  // Validate all statuses upfront
+  const invalid = records.find(r => !VALID_STATUSES.has((r.status || '').toUpperCase()));
+  if (invalid)
+    return res.status(400).json({ error: `Invalid status "${invalid.status}". Must be one of: ${[...VALID_STATUSES].join(', ')}` });
   try {
-    for (const { student_id, status } of records) {
-      await db.query(
-        'INSERT INTO attendance (student_id, subject_id, date, status) VALUES (?,?,?,?) ON DUPLICATE KEY UPDATE status=VALUES(status)',
-        [student_id, subject_id, date, status]
-      );
-    }
+    if (!await assertTeacherOwnsSubject(req, res, subject_id)) return;
+    const placeholders = records.map(() => '(?,?,?,?)').join(',');
+    const values = records.flatMap(({ student_id, status }) =>
+      [student_id, subject_id, date, status.toUpperCase()]
+    );
+    await db.query(
+      `INSERT INTO attendance (student_id, subject_id, date, status) VALUES ${placeholders}
+       ON DUPLICATE KEY UPDATE status = VALUES(status)`,
+      values
+    );
     res.json({ message: `Attendance marked for ${records.length} student(s)` });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error(err); res.status(500).json({ error: 'Internal server error' });
   }
 });
 
 // GET /student/:student_id — All attendance for a student
-router.get('/student/:student_id', ownOrStaff, async (req, res) => {
+router.get('/student/:student_id', async (req, res) => {
+  // Students can only view their own attendance
+  if (req.user.role === 'student' && req.user.id !== parseInt(req.params.student_id)) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
   try {
     const [rows] = await db.query(
       `SELECT a.*, s.subject_name, s.subject_code
@@ -58,18 +70,21 @@ router.get('/student/:student_id', ownOrStaff, async (req, res) => {
     );
     res.json(rows);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error(err); res.status(500).json({ error: 'Internal server error' });
   }
 });
 
 // GET /student/:student_id/summary — Attendance % per subject
-router.get('/student/:student_id/summary', ownOrStaff, async (req, res) => {
+router.get('/student/:student_id/summary', async (req, res) => {
+  // Students can only view their own attendance
+  if (req.user.role === 'student' && req.user.id !== parseInt(req.params.student_id)) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
   try {
     const [rows] = await db.query(
       `SELECT s.subject_id, s.subject_name, s.subject_code,
               COUNT(*) AS total,
               SUM(a.status = 'PRESENT') AS present,
-              SUM(a.status = 'LATE') AS late,
               ROUND(SUM(a.status = 'PRESENT') / COUNT(*) * 100, 1) AS percentage
        FROM attendance a
        JOIN subjects s ON a.subject_id = s.subject_id
@@ -79,7 +94,7 @@ router.get('/student/:student_id/summary', ownOrStaff, async (req, res) => {
     );
     res.json(rows);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error(err); res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -97,12 +112,16 @@ router.get('/subject/:subject_id/date/:date', async (req, res) => {
     );
     res.json(rows);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error(err); res.status(500).json({ error: 'Internal server error' });
   }
 });
 
 // GET /student/:student_id/detailed — Attendance summary using view (includes LEAVE + defaulter status)
-router.get('/student/:student_id/detailed', ownOrStaff, async (req, res) => {
+router.get('/student/:student_id/detailed', async (req, res) => {
+  // Students can only view their own attendance
+  if (req.user.role === 'student' && req.user.id !== parseInt(req.params.student_id)) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
   try {
     const { semester, academic_year_id } = req.query;
     let query = 'SELECT * FROM vw_student_attendance_summary WHERE student_id = ?';
@@ -112,7 +131,7 @@ router.get('/student/:student_id/detailed', ownOrStaff, async (req, res) => {
     query += ' ORDER BY subject_name';
     const [rows] = await db.query(query, params);
     res.json(rows);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Internal server error' }); }
 });
 
 // GET /defaulters — Students with attendance < 75% (admin/teacher only)
@@ -126,23 +145,27 @@ router.get('/defaulters', verify('teacher', 'admin'), async (req, res) => {
     query += ' ORDER BY attendance_percentage ASC';
     const [rows] = await db.query(query, params);
     res.json(rows);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) {
+    console.error(err); res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 // PUT /:attendance_id — Update attendance status
 router.put('/:attendance_id', verify('teacher', 'admin'), async (req, res) => {
   const { status } = req.body;
+  if (!VALID_STATUSES.has((status || '').toUpperCase()))
+    return res.status(400).json({ error: `Invalid status. Must be one of: ${[...VALID_STATUSES].join(', ')}` });
   try {
     const [result] = await db.query(
       'UPDATE attendance SET status = ? WHERE attendance_id = ?',
-      [status, req.params.attendance_id]
+      [status.toUpperCase(), req.params.attendance_id]
     );
     if (result.affectedRows === 0) {
       return res.status(404).json({ error: 'Attendance record not found' });
     }
     res.json({ message: 'Attendance updated' });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error(err); res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -158,7 +181,7 @@ router.delete('/:attendance_id', verify('teacher', 'admin'), async (req, res) =>
     }
     res.json({ message: 'Attendance deleted' });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error(err); res.status(500).json({ error: 'Internal server error' });
   }
 });
 

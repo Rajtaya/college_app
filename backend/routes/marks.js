@@ -1,62 +1,90 @@
 const express = require('express');
-const router = express.Router();
+const router = require('express').Router();
 const db = require('../db');
 const { verify } = require('../middleware/auth');
+const { assertTeacherOwnsSubject } = require('../middleware/subjectAuth');
 
 router.use(verify());
 
-const ownOrStaff = (req, res, next) => {
-  if (req.user.role === 'student' && req.user.id !== parseInt(req.params.student_id)) {
-    return res.status(403).json({ error: 'Forbidden' });
-  }
-  next();
-};
-
 // Visibility rules — which exam types are visible to students
 const STUDENT_VISIBLE = new Set(['INTERNAL','ASSIGNMENT','PRACTICAL_INTERNAL']);
+const VALID_EXAM_TYPES = new Set(['INTERNAL','ASSIGNMENT','PRACTICAL_INTERNAL']);
+
+// Validate marks value
+function validateMarks(obtained, max) {
+  const o = Number(obtained), m = Number(max);
+  if (isNaN(o) || isNaN(m)) return 'marks_obtained and max_marks must be numbers';
+  if (o < 0 || m <= 0)      return 'marks_obtained must be >= 0 and max_marks must be > 0';
+  if (o > m)                return 'marks_obtained cannot exceed max_marks';
+  if (m > 1000)             return 'max_marks cannot exceed 1000';
+  return null;
+}
 
 // POST / — Add/update marks (upsert on student+subject+exam_type)
 router.post('/', verify('teacher', 'admin'), async (req, res) => {
   const { student_id, subject_id, exam_type, marks_obtained, max_marks, semester } = req.body;
+  if (!VALID_EXAM_TYPES.has(exam_type))
+    return res.status(400).json({ error: `Invalid exam_type. Must be one of: ${[...VALID_EXAM_TYPES].join(', ')}` });
+  const marksErr = validateMarks(marks_obtained, max_marks);
+  if (marksErr) return res.status(400).json({ error: marksErr });
   const is_visible = STUDENT_VISIBLE.has(exam_type) ? 1 : 0;
   try {
+    if (!await assertTeacherOwnsSubject(req, res, subject_id)) return;
     const [result] = await db.query(
       `INSERT INTO marks (student_id, subject_id, exam_type, marks_obtained, max_marks, semester, is_visible_to_student)
        VALUES (?, ?, ?, ?, ?, ?, ?)
        ON DUPLICATE KEY UPDATE marks_obtained=VALUES(marks_obtained), max_marks=VALUES(max_marks)`,
-      [student_id, subject_id, exam_type, marks_obtained, max_marks, semester, is_visible]
+      [student_id, subject_id, exam_type, Number(marks_obtained), Number(max_marks), semester, is_visible]
     );
     res.json({ message: 'Marks saved', mark_id: result.insertId });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error(err); res.status(500).json({ error: 'Internal server error' });
   }
 });
 
 // POST /bulk — Bulk save marks for entire class
 router.post('/bulk', verify('teacher', 'admin'), async (req, res) => {
   const { entries, subject_id, exam_type, max_marks, semester } = req.body;
-  // entries = [{student_id, marks_obtained}]
+  if (!VALID_EXAM_TYPES.has(exam_type))
+    return res.status(400).json({ error: `Invalid exam_type. Must be one of: ${[...VALID_EXAM_TYPES].join(', ')}` });
+  if (!max_marks || isNaN(Number(max_marks)) || Number(max_marks) <= 0 || Number(max_marks) > 1000)
+    return res.status(400).json({ error: 'max_marks must be a number between 1 and 1000' });
   const is_visible = STUDENT_VISIBLE.has(exam_type) ? 1 : 0;
   try {
-    let saved = 0;
-    for (const e of entries) {
-      if (e.marks_obtained === '' || e.marks_obtained === null || e.marks_obtained === undefined) continue;
-      await db.query(
-        `INSERT INTO marks (student_id, subject_id, exam_type, marks_obtained, max_marks, semester, is_visible_to_student)
-         VALUES (?, ?, ?, ?, ?, ?, ?)
-         ON DUPLICATE KEY UPDATE marks_obtained=VALUES(marks_obtained), max_marks=VALUES(max_marks)`,
-        [e.student_id, subject_id, exam_type, Number(e.marks_obtained), max_marks, semester, is_visible]
-      );
-      saved++;
+    if (!await assertTeacherOwnsSubject(req, res, subject_id)) return;
+    // Filter out blank entries
+    const valid = (entries || []).filter(
+      e => e.marks_obtained !== '' && e.marks_obtained != null
+    );
+    if (valid.length === 0) return res.json({ message: 'No marks to save' });
+    // Validate each entry's marks
+    for (const e of valid) {
+      const err = validateMarks(e.marks_obtained, max_marks);
+      if (err) return res.status(400).json({ error: `student_id ${e.student_id}: ${err}` });
     }
-    res.json({ message: `Marks saved for ${saved} student(s)` });
+    const placeholders = valid.map(() => '(?,?,?,?,?,?,?)').join(',');
+    const values = valid.flatMap(e => [
+      e.student_id, subject_id, exam_type,
+      Number(e.marks_obtained), Number(max_marks), semester, is_visible
+    ]);
+    await db.query(
+      `INSERT INTO marks (student_id, subject_id, exam_type, marks_obtained, max_marks, semester, is_visible_to_student)
+       VALUES ${placeholders}
+       ON DUPLICATE KEY UPDATE marks_obtained=VALUES(marks_obtained), max_marks=VALUES(max_marks)`,
+      values
+    );
+    res.json({ message: `Marks saved for ${valid.length} student(s)` });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error(err); res.status(500).json({ error: 'Internal server error' });
   }
 });
 
 // GET /student/:student_id — Marks visible to student only
-router.get('/student/:student_id', ownOrStaff, async (req, res) => {
+router.get('/student/:student_id', async (req, res) => {
+  // Students can only view their own marks
+  if (req.user.role === 'student' && req.user.id !== parseInt(req.params.student_id)) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
   try {
     const [rows] = await db.query(
       `SELECT m.*, s.subject_name, s.subject_code, s.category, s.credits
@@ -68,11 +96,11 @@ router.get('/student/:student_id', ownOrStaff, async (req, res) => {
     );
     res.json(rows);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error(err); res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// GET /student/:student_id/all — All marks including external (admin/teacher view)
+// GET /student/:student_id/all — All marks including external (admin/teacher only)
 router.get('/student/:student_id/all', verify('teacher', 'admin'), async (req, res) => {
   try {
     const [rows] = await db.query(
@@ -85,12 +113,16 @@ router.get('/student/:student_id/all', verify('teacher', 'admin'), async (req, r
     );
     res.json(rows);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error(err); res.status(500).json({ error: 'Internal server error' });
   }
 });
 
 // GET /student/:student_id/summary — Marks summary per subject
-router.get('/student/:student_id/summary', ownOrStaff, async (req, res) => {
+router.get('/student/:student_id/summary', async (req, res) => {
+  // Students can only view their own marks
+  if (req.user.role === 'student' && req.user.id !== parseInt(req.params.student_id)) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
   try {
     const [rows] = await db.query(
       `SELECT s.subject_id, s.subject_name, s.subject_code,
@@ -105,12 +137,12 @@ router.get('/student/:student_id/summary', ownOrStaff, async (req, res) => {
     );
     res.json(rows);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error(err); res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// GET /subject/:subject_id — All marks for a subject (admin view)
-router.get('/subject/:subject_id', async (req, res) => {
+// GET /subject/:subject_id — All marks for a subject (admin/teacher view)
+router.get('/subject/:subject_id', verify('teacher', 'admin'), async (req, res) => {
   try {
     const [rows] = await db.query(
       `SELECT m.*, CONCAT(st.first_name, ' ', st.last_name) AS name, st.roll_no
@@ -122,12 +154,16 @@ router.get('/subject/:subject_id', async (req, res) => {
     );
     res.json(rows);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error(err); res.status(500).json({ error: 'Internal server error' });
   }
 });
 
 // GET /student/:student_id/detailed — Marks with percentage + PASS/FAIL per subject
-router.get('/student/:student_id/detailed', ownOrStaff, async (req, res) => {
+router.get('/student/:student_id/detailed', async (req, res) => {
+  // Students can only view their own marks
+  if (req.user.role === 'student' && req.user.id !== parseInt(req.params.student_id)) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
   try {
     const { semester, academic_year_id } = req.query;
     let query = 'SELECT * FROM vw_student_marks_summary WHERE student_id = ? AND is_visible_to_student = 1';
@@ -137,12 +173,18 @@ router.get('/student/:student_id/detailed', ownOrStaff, async (req, res) => {
     query += ' ORDER BY subject_name, exam_type';
     const [rows] = await db.query(query, params);
     res.json(rows);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Internal server error' }); }
 });
 
 // PUT /:mark_id — Update marks
 router.put('/:mark_id', verify('teacher', 'admin'), async (req, res) => {
   const { marks_obtained, max_marks, exam_type } = req.body;
+  if (exam_type && !VALID_EXAM_TYPES.has(exam_type))
+    return res.status(400).json({ error: `Invalid exam_type. Must be one of: ${[...VALID_EXAM_TYPES].join(', ')}` });
+  if (marks_obtained != null && max_marks != null) {
+    const marksErr = validateMarks(marks_obtained, max_marks);
+    if (marksErr) return res.status(400).json({ error: marksErr });
+  }
   try {
     const [result] = await db.query(
       `UPDATE marks SET
@@ -155,7 +197,7 @@ router.put('/:mark_id', verify('teacher', 'admin'), async (req, res) => {
     if (result.affectedRows === 0) return res.status(404).json({ error: 'Mark record not found' });
     res.json({ message: 'Marks updated' });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error(err); res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -166,7 +208,7 @@ router.delete('/:mark_id', verify('teacher', 'admin'), async (req, res) => {
     if (result.affectedRows === 0) return res.status(404).json({ error: 'Mark record not found' });
     res.json({ message: 'Mark deleted' });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error(err); res.status(500).json({ error: 'Internal server error' });
   }
 });
 

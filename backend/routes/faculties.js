@@ -10,7 +10,7 @@ router.get('/', async (req, res) => {
   try {
     const [rows] = await db.query('SELECT * FROM faculties ORDER BY faculty_name');
     res.json(rows);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: "Internal server error" }); }
 });
 
 // Add faculty
@@ -22,15 +22,16 @@ router.post('/', verify('admin'), async (req, res) => {
       [faculty_name, description]
     );
     res.json({ message: 'Faculty added', faculty_id: result.insertId });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: "Internal server error" }); }
 });
 
 // Delete faculty
 router.delete('/:id', verify('admin'), async (req, res) => {
   try {
-    await db.query('DELETE FROM faculties WHERE faculty_id = ?', [req.params.id]);
+    const [result] = await db.query('DELETE FROM faculties WHERE faculty_id = ?', [req.params.id]);
+    if (result.affectedRows === 0) return res.status(404).json({ error: 'Faculty not found' });
     res.json({ message: 'Faculty deleted' });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: "Internal server error" }); }
 });
 
 module.exports = router;

@@ -73,7 +73,7 @@ router.get('/students/:subject_id', verify('teacher', 'admin'), async (req, res)
       [req.params.subject_id]
     );
     res.json(rows);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: "Internal server error" }); }
 });
 
 // GET /enrollment/subjects/:student_id
@@ -195,7 +195,7 @@ router.get('/subjects/:student_id', async (req, res) => {
     });
 
     res.json(enriched);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: "Internal server error" }); }
 });
 
 // GET /enrollment/status/:student_id
@@ -213,15 +213,16 @@ router.get('/status/:student_id', async (req, res) => {
       [req.params.student_id]
     );
     res.json(rows);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: "Internal server error" }); }
 });
 
 // POST /enrollment/save-draft/:student_id
 router.post('/save-draft/:student_id', verify('student', 'admin'), async (req, res) => {
+  if (!canAccessStudent(req, res, req.params.student_id)) return;
   const { decisions } = req.body;
   try {
     const [studentRows] = await db.query(
-      'SELECT * FROM students WHERE student_id = ?', [req.params.student_id]
+      'SELECT student_id FROM students WHERE student_id = ?', [req.params.student_id]
     );
     if (!studentRows.length) return res.status(404).json({ error: 'Student not found' });
     // Check for non-draft submitted records instead of relying on flag
@@ -233,20 +234,25 @@ router.post('/save-draft/:student_id', verify('student', 'admin'), async (req, r
     if (submittedCheck[0].count > 0)
       return res.status(400).json({ error: 'Enrollment already submitted and locked' });
 
-    for (const d of decisions) {
+    if (decisions.length > 0) {
+      // Batch INSERT — single query instead of one per subject
+      const placeholders = decisions.map(() => '(?,?,?,?,?,1)').join(',');
+      const values = decisions.flatMap(d => [
+        req.params.student_id, d.subject_id,
+        d.status || 'PENDING', d.is_major || 0, d.remarks || null
+      ]);
       await db.query(
         `INSERT INTO student_subject_enrollment
-         (student_id, subject_id, status, is_major, remarks, is_draft)
-         VALUES (?, ?, ?, ?, ?, 1)
+           (student_id, subject_id, status, is_major, remarks, is_draft)
+         VALUES ${placeholders}
          ON DUPLICATE KEY UPDATE
-         status=VALUES(status), is_major=VALUES(is_major),
-         remarks=VALUES(remarks), is_draft=1`,
-        [req.params.student_id, d.subject_id, d.status || 'PENDING',
-         d.is_major || 0, d.remarks || null]
+           status=VALUES(status), is_major=VALUES(is_major),
+           remarks=VALUES(remarks), is_draft=1`,
+        values
       );
     }
     res.json({ message: 'Draft saved successfully' });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: "Internal server error" }); }
 });
 
 // POST /enrollment/submit/:student_id
@@ -551,24 +557,29 @@ router.post('/submit/:student_id', verify('student', 'admin'), async (req, res) 
       [req.params.student_id]
     );
 
-    for (const e of enrollments) {
-      // Skip subjects already set by admin — don't overwrite admin decisions
-      const [adminCheck] = await db.query(
-        'SELECT admin_modified FROM student_subject_enrollment WHERE student_id = ? AND subject_id = ? AND admin_modified = 1',
-        [req.params.student_id, e.subject_id]
-      );
-      if (adminCheck.length > 0) continue;
+    // Fetch all admin-modified subject IDs in one query — avoids N+1 loop
+    const [adminModified] = await db.query(
+      'SELECT subject_id FROM student_subject_enrollment WHERE student_id = ? AND admin_modified = 1',
+      [req.params.student_id]
+    );
+    const adminSubjectIds = new Set(adminModified.map(r => r.subject_id));
 
+    // Skip admin-modified subjects, then batch INSERT the rest
+    const toInsert = enrollments.filter(e => !adminSubjectIds.has(e.subject_id));
+    if (toInsert.length > 0) {
+      const placeholders = toInsert.map(() => '(?,?,?,?,?,0)').join(',');
+      const values = toInsert.flatMap(e => [
+        req.params.student_id, e.subject_id,
+        e.status, e.is_major || false, e.remarks || ''
+      ]);
       await db.query(
         `INSERT INTO student_subject_enrollment
            (student_id, subject_id, status, is_major, remarks, is_draft)
-         VALUES (?, ?, ?, ?, ?, 0)
+         VALUES ${placeholders}
          ON DUPLICATE KEY UPDATE
-           status = VALUES(status),
-           is_major = VALUES(is_major),
-           remarks = VALUES(remarks),
-           is_draft = 0`,
-        [req.params.student_id, e.subject_id, e.status, e.is_major || false, e.remarks || '']
+           status=VALUES(status), is_major=VALUES(is_major),
+           remarks=VALUES(remarks), is_draft=0`,
+        values
       );
     }
 
@@ -576,7 +587,7 @@ router.post('/submit/:student_id', verify('student', 'admin'), async (req, res) 
     await db.query('UPDATE students SET enrollment_submitted = 1 WHERE student_id = ?', [req.params.student_id]);
 
     res.json({ message: 'Enrollment submitted successfully!' });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: "Internal server error" }); }
 });
 
 // ── POST /enroll-semester — Auto-enroll student in all subjects for their semester (admin only)
@@ -590,7 +601,7 @@ router.post("/enroll-semester", verify("admin"), async (req, res) => {
     const [[result]] = await db.query("SELECT @count AS enrolled_count, @msg AS message");
     const isError = result.message && result.message.startsWith("ERROR");
     res.status(isError ? 400 : 200).json(result);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: "Internal server error" }); }
 });
 
 module.exports = router;

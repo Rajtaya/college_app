@@ -14,7 +14,7 @@ router.get('/', async (req, res) => {
        ORDER BY f.faculty_name, d.discipline_name`
     );
     res.json(rows);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: "Internal server error" }); }
 });
 
 // Get disciplines by faculty
@@ -25,7 +25,7 @@ router.get('/faculty/:faculty_id', async (req, res) => {
       [req.params.faculty_id]
     );
     res.json(rows);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: "Internal server error" }); }
 });
 
 // Add discipline
@@ -37,15 +37,16 @@ router.post('/', verify('admin'), async (req, res) => {
       [discipline_name, faculty_id||null, description||'']
     );
     res.json({ message: 'Discipline added', discipline_id: result.insertId });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: "Internal server error" }); }
 });
 
 // Delete discipline
 router.delete('/:id', verify('admin'), async (req, res) => {
   try {
-    await db.query('DELETE FROM disciplines WHERE discipline_id = ?', [req.params.id]);
+    const [result] = await db.query('DELETE FROM disciplines WHERE discipline_id = ?', [req.params.id]);
+    if (result.affectedRows === 0) return res.status(404).json({ error: 'Discipline not found' });
     res.json({ message: 'Discipline deleted' });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: "Internal server error" }); }
 });
 
 module.exports = router;

@@ -1,23 +1,32 @@
-# Environment files — never commit secrets
-.env
-.env.*
-!.env.example
-
 # Dependencies
 node_modules/
 
-# Build outputs
-build/
-dist/
+# Environment variables (NEVER commit secrets)
+.env
+.env.local
+.env.production
 
 # Logs
 *.log
-npm-debug.log*
 
 # OS
 .DS_Store
 Thumbs.db
 
-# IDE
-.vscode/
-.idea/
+# Build artifacts
+frontend/build/
+frontend/dist/
+
+# Archives & dumps (large binary files)
+*.zip
+*.sql
+*.pdf
+
+# Uploaded files (notifications attachments)
+backend/uploads/*
+!backend/uploads/.gitkeep
+
+# Scratch files
+p.txt
+pp.txt
+ppp.txt

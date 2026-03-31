@@ -17,7 +17,7 @@ router.get('/', async (req, res) => {
        ORDER BY l.level_name, f.faculty_name, p.programme_name, s.semester, s.category`
     );
     res.json(rows);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 router.post('/', verify('admin'), async (req, res) => {
@@ -40,7 +40,7 @@ router.post('/', verify('admin'), async (req, res) => {
       [subject_code, subject_name, category, semester, credits, internal_marks||0, level_id||null, isCommon?null:(programme_id||null), faculty_id||null, resolved_discipline_id, isCommon?true:false]
     );
     res.json({ message: 'Subject added', subject_id: result.insertId });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 // GET /teacher/:teacher_id — all assignments for a teacher (with section + programme info)
@@ -63,7 +63,7 @@ router.get('/teacher/:teacher_id', async (req, res) => {
       [req.params.teacher_id]
     );
     res.json(rows);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 // GET /:subject_id/teachers — all teachers for a subject with their sections
@@ -81,7 +81,7 @@ router.get('/:subject_id/teachers', async (req, res) => {
       [req.params.subject_id]
     );
     res.json(rows);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 // POST /:subject_id/teachers — assign teacher to subject with section + programme
@@ -95,7 +95,7 @@ router.post('/:subject_id/teachers', verify('teacher', 'admin'), async (req, res
       [req.params.subject_id, teacher_id, section, programme_id, class_name]
     );
     res.json({ message: 'Teacher assigned to section' });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 // PUT /assignments/:assignment_id — edit an existing subject-teacher assignment
@@ -107,7 +107,7 @@ router.put('/assignments/:assignment_id', verify('teacher', 'admin'), async (req
       [section || 'A', programme_id || null, class_name || null, req.params.assignment_id]
     );
     res.json({ message: 'Assignment updated' });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 // DELETE /:subject_id/teachers/:teacher_id — remove specific assignment
@@ -120,7 +120,7 @@ router.delete('/:subject_id/teachers/:teacher_id', verify('teacher', 'admin'), a
     if (programme_id) { query += ' AND programme_id = ?'; params.push(programme_id); }
     await db.query(query, params);
     res.json({ message: 'Assignment removed' });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 // DELETE by assignment_id — remove specific row
@@ -128,7 +128,7 @@ router.delete('/assignments/:assignment_id', verify('teacher', 'admin'), async (
   try {
     await db.query('DELETE FROM subject_teachers WHERE id = ?', [req.params.assignment_id]);
     res.json({ message: 'Assignment removed' });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 router.get('/:id', async (req, res) => {
@@ -144,7 +144,7 @@ router.get('/:id', async (req, res) => {
     );
     if (!rows.length) return res.status(404).json({ error: 'Subject not found' });
     res.json(rows[0]);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 module.exports = router;

@@ -16,7 +16,7 @@ router.get('/', async (req, res) => {
        ORDER BY l.level_name, f.faculty_name, p.programme_name`
     );
     res.json(rows);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: "Internal server error" }); }
 });
 
 // Get programmes by level
@@ -29,7 +29,7 @@ router.get('/level/:level_id', async (req, res) => {
       [req.params.level_id]
     );
     res.json(rows);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: "Internal server error" }); }
 });
 
 // Get programmes by level and faculty
@@ -46,7 +46,7 @@ router.get('/filter', async (req, res) => {
     if (faculty_id) { query += ' AND p.faculty_id = ?'; params.push(faculty_id); }
     const [rows] = await db.query(query, params);
     res.json(rows);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: "Internal server error" }); }
 });
 
 // Add programme
@@ -58,15 +58,16 @@ router.post('/', verify('admin'), async (req, res) => {
       [level_id, faculty_id||null, programme_name, duration_years||3]
     );
     res.json({ message: 'Programme added', programme_id: result.insertId });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: "Internal server error" }); }
 });
 
 // Delete programme
 router.delete('/:id', verify('admin'), async (req, res) => {
   try {
-    await db.query('DELETE FROM programmes WHERE programme_id = ?', [req.params.id]);
+    const [result] = await db.query('DELETE FROM programmes WHERE programme_id = ?', [req.params.id]);
+    if (result.affectedRows === 0) return res.status(404).json({ error: 'Programme not found' });
     res.json({ message: 'Programme deleted' });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: "Internal server error" }); }
 });
 
 module.exports = router;

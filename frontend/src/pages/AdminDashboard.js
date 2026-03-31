@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import * as XLSX from 'xlsx';
-import API from '../api';
+import API, { SERVER_BASE } from '../api';
 import SubjectsTab from '../components/SubjectsTab';
 
 export default function AdminDashboard({ admin, onLogout }) {
@@ -30,6 +30,7 @@ export default function AdminDashboard({ admin, onLogout }) {
   const [msgType, setMsgType] = useState('success');
   const [editingTeacher, setEditingTeacher] = useState(null);
   const [disciplines, setDisciplines] = useState([]);
+  const [departments, setDepartments] = useState([]);
   const [managingTeacher, setManagingTeacher] = useState(null);
   const [allSubjects, setAllSubjects] = useState([]);
   const [teacherSubjects, setTeacherSubjects] = useState([]);
@@ -40,12 +41,20 @@ export default function AdminDashboard({ admin, onLogout }) {
   const teacherFileRef = useRef();
   const feeFileRef = useRef();
 
+  // Notifications state
+  const [notifications, setNotifications] = useState([]);
+  const [notifForm, setNotifForm] = useState({ title: '', message: '', target: 'all', programme_id: '', target_semester: '' });
+  const [notifFile, setNotifFile] = useState(null);
+  const [notifSending, setNotifSending] = useState(false);
+  const notifFileRef = useRef();
+
   useEffect(() => {
     fetchLevels();
     fetchFaculties();
     fetchProgrammes();
     fetchStudents();
     fetchDisciplines();
+    fetchDepartments();
   }, []);
 
   useEffect(() => {
@@ -55,6 +64,7 @@ export default function AdminDashboard({ admin, onLogout }) {
     if (activeTab === 'fees') { fetchFees(); fetchStudents(); fetchFeeSummary(); autoMarkOverdue(); }
     if (activeTab === 'marks') fetchAllMarks();
     if (activeTab === 'enrollment') { fetchEnrollmentSummary(); setSelectedEnrollStudent(null); }
+    if (activeTab === 'notifications') fetchNotifications();
   }, [activeTab]);
 
   useEffect(() => {
@@ -71,6 +81,7 @@ export default function AdminDashboard({ admin, onLogout }) {
   const fetchProgrammes = async () => { try { const r = await API.get('/programmes'); setProgrammes(r.data); } catch(e){} };
   const fetchStudents = async () => { try { const r = await API.get('/admin/students'); setStudents(r.data); } catch(e){} };
   const fetchDisciplines = async () => { try { const r = await API.get('/disciplines'); setDisciplines(r.data); } catch(e){} };
+  const fetchDepartments = async () => { try { const r = await API.get('/departments'); setDepartments(r.data); } catch(e){} };
   const fetchTeachers = async () => { try { const r = await API.get('/admin/teachers'); setTeachers(r.data); } catch(e){} };
   const fetchAttendance = async () => { try { const r = await API.get('/admin/attendance'); setAttendance(r.data); } catch(e){} };
   const fetchFees = async () => { try { const r = await API.get('/admin/fees'); setFees(r.data); } catch(e){} };
@@ -78,6 +89,45 @@ export default function AdminDashboard({ admin, onLogout }) {
   const autoMarkOverdue = async () => { try { await API.put('/admin/fees/mark-overdue'); } catch(e){} };
   const fetchAllMarks = async () => { try { const r = await API.get('/admin/marks'); setMarks(r.data); } catch(e){} };
   const fetchEnrollmentSummary = async () => { try { const r = await API.get('/admin/enrollment/summary'); setEnrollmentSummary(r.data); } catch(e){} };
+  const fetchNotifications = async () => { try { const r = await API.get('/notifications'); setNotifications(r.data); } catch(e){} };
+
+  const API_BASE = SERVER_BASE;
+
+  const sendNotification = async () => {
+    if (!notifForm.title.trim() || !notifForm.message.trim()) { showMsg('Title and message are required', 'error'); return; }
+    if (notifForm.target === 'class' && (!notifForm.programme_id || !notifForm.target_semester)) {
+      showMsg('Select programme and semester for class-wise notification', 'error'); return;
+    }
+    setNotifSending(true);
+    try {
+      const fd = new FormData();
+      fd.append('title', notifForm.title);
+      fd.append('message', notifForm.message);
+      fd.append('target', notifForm.target);
+      if (notifForm.target === 'class') {
+        fd.append('programme_id', notifForm.programme_id);
+        fd.append('target_semester', notifForm.target_semester);
+      }
+      if (notifFile) fd.append('attachment', notifFile);
+      await API.post('/notifications', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      const prog = notifForm.target === 'class' ? programmes.find(p => String(p.programme_id) === String(notifForm.programme_id)) : null;
+      showMsg(notifForm.target === 'all' ? 'Notification sent to all students!' : `Notification sent to ${prog?.programme_name || ''} Sem ${notifForm.target_semester}!`);
+      setNotifForm({ title: '', message: '', target: 'all', programme_id: '', target_semester: '' });
+      setNotifFile(null);
+      if (notifFileRef.current) notifFileRef.current.value = '';
+      fetchNotifications();
+    } catch (e) { showMsg(e.response?.data?.error || 'Failed to send', 'error'); }
+    setNotifSending(false);
+  };
+
+  const deleteNotification = async (id) => {
+    if (!window.confirm('Delete this notification?')) return;
+    try {
+      await API.delete(`/notifications/${id}`);
+      showMsg('Notification deleted');
+      fetchNotifications();
+    } catch (e) { showMsg('Failed to delete', 'error'); }
+  };
 
   // Helper: build enrollment sheet
   // Format: one column for Code, one for Name, per subject slot
@@ -378,7 +428,6 @@ export default function AdminDashboard({ admin, onLogout }) {
         { key: 'INTERNAL',           label: 'Internal Theory' },
         { key: 'PRACTICAL_INTERNAL', label: 'Practical Internal' },
         { key: 'ASSIGNMENT',         label: 'Assignment' },
-        { key: 'EXTERNAL',           label: 'External' },
       ];
       const semesters = [...new Set(data.map(d => d.semester))].sort((a,b) => a-b);
       semesters.forEach(sem => {
@@ -1020,7 +1069,10 @@ export default function AdminDashboard({ admin, onLogout }) {
   const handleUpdateTeacher = async (e) => {
     e.preventDefault();
     try {
-      await API.put(`/admin/teachers/${editingTeacher.teacher_id}`, editingTeacher);
+      // Always derive discipline_ids and department_ids so the backend never sees them as undefined
+      const discipline_ids = editingTeacher.discipline_ids ?? (editingTeacher.disciplines || []).map(d => d.discipline_id);
+      const department_ids = editingTeacher.department_ids ?? (editingTeacher.departments || []).map(d => d.department_id);
+      await API.put(`/admin/teachers/${editingTeacher.teacher_id}`, { ...editingTeacher, discipline_ids, department_ids });
       showMsg('Teacher updated!'); setEditingTeacher(null); fetchTeachers();
     } catch(err) { showMsg(err.response?.data?.error || 'Error', 'error'); }
   };
@@ -1111,7 +1163,7 @@ export default function AdminDashboard({ admin, onLogout }) {
   const downloadTemplate = (type) => {
     const templates = {
       students: [{ roll_no:'BA001', name:'Priya Sharma', email:'priya@college.com', phone:'9876543211', level_name:'UG', faculty_name:'Arts', programme_name:'B.A', semester:1, year:1, password:'password123', discipline_1:'Economics', discipline_2:'History', discipline_3:'English' }],
-      teachers: [{ title:'Dr', first_name:'Sharma', last_name:'Ji', email:'sharma@college.com', phone:'9876543211', department:'Computer Science', password:'teacher123' }],
+      teachers: [{ title:'Dr', first_name:'Sharma', last_name:'Ji', email:'sharma@college.com', phone:'9876543211', designation:'Assistant Professor', employee_code:'EMP001', password:'teacher123', discipline_1:'Economics', discipline_2:'', discipline_3:'', department_1:'Economics Department', department_2:'' }],
       fees: [{ roll_no:'BCA001', amount:15000, fee_type:'Tuition Fee', due_date:'2026-04-01' }],
     };
     const ws = XLSX.utils.json_to_sheet(templates[type]);
@@ -1165,16 +1217,32 @@ export default function AdminDashboard({ admin, onLogout }) {
     try {
       const data = await file.arrayBuffer(); const wb = XLSX.read(data);
       const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
+      // Build lookup maps for discipline and department names → IDs
+      const discMap = {}; disciplines.forEach(d => { discMap[d.discipline_name.toLowerCase()] = d.discipline_id; });
+      const deptMap = {}; departments.forEach(d => { deptMap[d.department_name.toLowerCase()] = d.department_id; });
       let success = 0, failed = 0;
       for (const row of rows) {
         try {
-          const fullName = String(row.name||'').trim();
-          const parts = fullName.split(/\s+/);
-          const first_name = parts[0] || '';
-          const last_name = parts.slice(1).join(' ') || '';
-          await API.post('/admin/teachers', { first_name, last_name, email: String(row.email||''), phone: String(row.phone||''), department: String(row.department||''), password: String(row.password||'teacher123') }); success++;
-        }
-        catch { failed++; }
+          // Resolve discipline names from columns discipline_1, discipline_2, discipline_3
+          const discNames = [row.discipline_1, row.discipline_2, row.discipline_3].filter(Boolean);
+          const discipline_ids = discNames.map(n => discMap[String(n).toLowerCase()]).filter(Boolean);
+          // Resolve department names from column department_1, department_2
+          const deptNames = [row.department_1, row.department_2].filter(Boolean);
+          const department_ids = deptNames.map(n => deptMap[String(n).toLowerCase()]).filter(Boolean);
+          await API.post('/admin/teachers', {
+            title:         String(row.title         || '').trim() || null,
+            first_name:    String(row.first_name    || '').trim(),
+            last_name:     String(row.last_name     || '').trim(),
+            email:         String(row.email         || '').trim(),
+            phone:         String(row.phone         || '').trim() || null,
+            designation:   String(row.designation   || '').trim() || null,
+            employee_code: String(row.employee_code || '').trim() || null,
+            password:      String(row.password      || 'teacher123'),
+            discipline_ids: discipline_ids.length > 0 ? discipline_ids : undefined,
+            department_ids: department_ids.length > 0 ? department_ids : undefined,
+          });
+          success++;
+        } catch { failed++; }
       }
       showMsg(`✅ Imported ${success}${failed?`, ❌ ${failed} failed`:''}`, failed?'warning':'success');
       fetchTeachers();
@@ -1203,7 +1271,7 @@ export default function AdminDashboard({ admin, onLogout }) {
     } catch { showMsg('Failed!','error'); } finally { setImporting(false); e.target.value=''; }
   };
 
-  const tabs = ['levels','students','teachers','subjects','enrollment','attendance','fees','marks'];
+  const tabs = ['levels','students','teachers','subjects','enrollment','attendance','fees','marks','notifications'];
   const msgStyle = { ...styles.msg, background: msgType==='error'?'#fff5f5':msgType==='warning'?'#fffbeb':'#c6f6d5', color: msgType==='error'?'#c53030':msgType==='warning'?'#92400e':'#276749' };
 
   return (
@@ -1220,7 +1288,7 @@ export default function AdminDashboard({ admin, onLogout }) {
         {tabs.map(tab => (
           <button key={tab} style={{...styles.tab, ...(activeTab===tab ? styles.activeTab : {})}}
             onClick={() => { setActiveTab(tab); setMsg(''); setForm({}); setStudentLevel(''); setStudentFaculty(''); }}>
-            {tab==='levels'?'🏫 Levels & Faculties':tab.charAt(0).toUpperCase()+tab.slice(1)}
+            {tab==='levels'?'🏫 Levels & Faculties':tab==='notifications'?'🔔 Notifications':tab.charAt(0).toUpperCase()+tab.slice(1)}
           </button>
         ))}
       </div>
@@ -1381,7 +1449,7 @@ export default function AdminDashboard({ admin, onLogout }) {
                   <input ref={teacherFileRef} type="file" accept=".xlsx,.xls" style={{display:'none'}} onChange={handleImportTeachers} disabled={importing} />
                 </label>
               </div>
-              <p style={styles.importHint}>📋 Required: <strong>name, email, phone, department, password</strong></p>
+              <p style={styles.importHint}>📋 Required: <strong>first_name, email, password</strong> &nbsp;|&nbsp; Optional: title, last_name, phone, designation, employee_code, discipline_1, discipline_2, discipline_3, department_1, department_2</p>
             </div>
             <h3>Add Teacher Manually</h3>
             <form onSubmit={handleAddTeacher} style={styles.form}>
@@ -1390,10 +1458,12 @@ export default function AdminDashboard({ admin, onLogout }) {
                 {['Dr','Mr','Mrs','Ms','Prof'].map(t=><option key={t} value={t}>{t}</option>)}
               </select>
               <input style={styles.input} placeholder="First Name" value={form.first_name||''} onChange={e=>setForm({...form,first_name:e.target.value})} required />
-              <input style={styles.input} placeholder="Last Name" value={form.last_name||''} onChange={e=>setForm({...form,last_name:e.target.value})} required />
-              {['email','phone','department'].map(f=>(
-                <input key={f} style={styles.input} placeholder={f} value={form[f]||''} onChange={e=>setForm({...form,[f]:e.target.value})} required={f!=='phone'} />
+              <input style={styles.input} placeholder="Last Name" value={form.last_name||''} onChange={e=>setForm({...form,last_name:e.target.value})} />
+              {['email','phone'].map(f=>(
+                <input key={f} style={styles.input} placeholder={f.charAt(0).toUpperCase()+f.slice(1)} value={form[f]||''} onChange={e=>setForm({...form,[f]:e.target.value})} required={f==='email'} />
               ))}
+              <input style={styles.input} placeholder="Designation (e.g. Assistant Professor)" value={form.designation||''} onChange={e=>setForm({...form,designation:e.target.value})} />
+              <input style={styles.input} placeholder="Employee Code (optional)" value={form.employee_code||''} onChange={e=>setForm({...form,employee_code:e.target.value})} />
               <input style={styles.input} type="password" placeholder="password" value={form.password||''} onChange={e=>setForm({...form,password:e.target.value})} required />
               <div style={{width:'100%'}}>
                 <label style={{fontSize:'0.85rem',color:'#4a5568',fontWeight:'600',display:'block',marginBottom:'0.3rem'}}>Disciplines (hold Ctrl/Cmd to select multiple)</label>
@@ -1402,6 +1472,16 @@ export default function AdminDashboard({ admin, onLogout }) {
                   onChange={e=>setForm({...form, discipline_ids: Array.from(e.target.selectedOptions).map(o=>parseInt(o.value))})}>
                   {disciplines.map(d=>(
                     <option key={d.discipline_id} value={d.discipline_id}>{d.discipline_name} {d.faculty_name ? `(${d.faculty_name})` : ''}</option>
+                  ))}
+                </select>
+              </div>
+              <div style={{width:'100%'}}>
+                <label style={{fontSize:'0.85rem',color:'#4a5568',fontWeight:'600',display:'block',marginBottom:'0.3rem'}}>Departments (hold Ctrl/Cmd to select multiple)</label>
+                <select multiple style={{...styles.input, height:'100px'}}
+                  value={form.department_ids||[]}
+                  onChange={e=>setForm({...form, department_ids: Array.from(e.target.selectedOptions).map(o=>parseInt(o.value))})}>
+                  {departments.map(d=>(
+                    <option key={d.department_id} value={d.department_id}>{d.department_name} {d.faculty_name ? `(${d.faculty_name})` : ''}</option>
                   ))}
                 </select>
               </div>
@@ -1416,18 +1496,30 @@ export default function AdminDashboard({ admin, onLogout }) {
                   {['Dr','Mr','Mrs','Ms','Prof'].map(t=><option key={t} value={t}>{t}</option>)}
                 </select>
                 <input style={styles.input} placeholder="First Name" value={editingTeacher.first_name||''} onChange={e=>setEditingTeacher({...editingTeacher,first_name:e.target.value})} required />
-                <input style={styles.input} placeholder="Last Name" value={editingTeacher.last_name||''} onChange={e=>setEditingTeacher({...editingTeacher,last_name:e.target.value})} required />
-                {['email','phone','department'].map(f=>(
-                  <input key={f} style={styles.input} placeholder={f} value={editingTeacher[f]||''}
-                    onChange={e=>setEditingTeacher({...editingTeacher,[f]:e.target.value})} required={f!=='phone'} />
+                <input style={styles.input} placeholder="Last Name" value={editingTeacher.last_name||''} onChange={e=>setEditingTeacher({...editingTeacher,last_name:e.target.value})} />
+                {['email','phone'].map(f=>(
+                  <input key={f} style={styles.input} placeholder={f.charAt(0).toUpperCase()+f.slice(1)} value={editingTeacher[f]||''}
+                    onChange={e=>setEditingTeacher({...editingTeacher,[f]:e.target.value})} required={f==='email'} />
                 ))}
+                <input style={styles.input} placeholder="Designation (e.g. Assistant Professor)" value={editingTeacher.designation||''} onChange={e=>setEditingTeacher({...editingTeacher,designation:e.target.value})} />
+                <input style={styles.input} placeholder="Employee Code (optional)" value={editingTeacher.employee_code||''} onChange={e=>setEditingTeacher({...editingTeacher,employee_code:e.target.value})} />
                 <div style={{width:'100%'}}>
                   <label style={{fontSize:'0.85rem',color:'#4a5568',fontWeight:'600',display:'block',marginBottom:'0.3rem'}}>Disciplines (hold Ctrl/Cmd to select multiple)</label>
                   <select multiple style={{...styles.input, height:'120px'}}
-                    value={(editingTeacher.discipline_ids || (editingTeacher.disciplines||[]).map(d=>d.discipline_id)).map(Number)}
+                    value={(editingTeacher.discipline_ids ?? (editingTeacher.disciplines||[]).map(d=>d.discipline_id)).map(Number)}
                     onChange={e=>setEditingTeacher({...editingTeacher, discipline_ids: Array.from(e.target.selectedOptions).map(o=>parseInt(o.value))})}>
                     {disciplines.map(d=>(
                       <option key={d.discipline_id} value={d.discipline_id}>{d.discipline_name} {d.faculty_name ? `(${d.faculty_name})` : ''}</option>
+                    ))}
+                  </select>
+                </div>
+                <div style={{width:'100%'}}>
+                  <label style={{fontSize:'0.85rem',color:'#4a5568',fontWeight:'600',display:'block',marginBottom:'0.3rem'}}>Departments (hold Ctrl/Cmd to select multiple)</label>
+                  <select multiple style={{...styles.input, height:'100px'}}
+                    value={(editingTeacher.department_ids ?? (editingTeacher.departments||[]).map(d=>d.department_id)).map(Number)}
+                    onChange={e=>setEditingTeacher({...editingTeacher, department_ids: Array.from(e.target.selectedOptions).map(o=>parseInt(o.value))})}>
+                    {departments.map(d=>(
+                      <option key={d.department_id} value={d.department_id}>{d.department_name} {d.faculty_name ? `(${d.faculty_name})` : ''}</option>
                     ))}
                   </select>
                 </div>
@@ -1443,7 +1535,11 @@ export default function AdminDashboard({ admin, onLogout }) {
                   <td style={styles.td}>{t.name}</td>
                   <td style={styles.td}>{t.email}</td>
                   <td style={styles.td}>{t.phone||'—'}</td>
-                  <td style={styles.td}>{t.department}</td>
+                  <td style={styles.td}>
+                    {t.departments && t.departments.length > 0
+                      ? t.departments.map(d => d.department_name).join(', ')
+                      : <span style={{color:'#a0aec0',fontSize:'0.8rem'}}>Not set</span>}
+                  </td>
                   <td style={styles.td}>
                     {t.disciplines && t.disciplines.length > 0
                       ? t.disciplines.map(d=>(
@@ -2098,6 +2194,145 @@ export default function AdminDashboard({ admin, onLogout }) {
                 </tr>
               ))}</tbody>
             </table>
+          </div>
+        )}
+
+        {/* NOTIFICATIONS TAB */}
+        {activeTab === 'notifications' && (
+          <div>
+            {/* Send notification form */}
+            <div style={{ background:'#fff', borderRadius:'12px', padding:'1.5rem', boxShadow:'0 2px 8px rgba(0,0,0,0.08)', marginBottom:'1.5rem' }}>
+              <h3 style={{ margin:'0 0 1rem', color:'#2d3748', borderBottom:'2px solid #e2e8f0', paddingBottom:'0.5rem' }}>
+                📢 Send New Notification
+              </h3>
+              <div style={{ display:'grid', gridTemplateColumns: notifForm.target === 'class' ? '1fr 1fr 1fr' : '1fr', gap:'12px', marginBottom:'0.75rem' }}>
+                <div>
+                  <label style={{ display:'block', fontSize:'0.85rem', fontWeight:'600', color:'#4a5568', marginBottom:'4px' }}>Send To *</label>
+                  <select style={{ ...styles.input, width:'100%', boxSizing:'border-box' }}
+                    value={notifForm.target} onChange={e => setNotifForm(p => ({ ...p, target: e.target.value, programme_id: '', target_semester: '' }))}>
+                    <option value="all">All Students</option>
+                    <option value="class">Class-wise (Programme + Semester)</option>
+                  </select>
+                </div>
+                {notifForm.target === 'class' && (
+                  <>
+                    <div>
+                      <label style={{ display:'block', fontSize:'0.85rem', fontWeight:'600', color:'#4a5568', marginBottom:'4px' }}>Programme *</label>
+                      <select style={{ ...styles.input, width:'100%', boxSizing:'border-box' }}
+                        value={notifForm.programme_id} onChange={e => setNotifForm(p => ({ ...p, programme_id: e.target.value }))}>
+                        <option value="">Select programme...</option>
+                        {programmes.map(p => <option key={p.programme_id} value={p.programme_id}>{p.programme_name}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label style={{ display:'block', fontSize:'0.85rem', fontWeight:'600', color:'#4a5568', marginBottom:'4px' }}>Semester *</label>
+                      <select style={{ ...styles.input, width:'100%', boxSizing:'border-box' }}
+                        value={notifForm.target_semester} onChange={e => setNotifForm(p => ({ ...p, target_semester: e.target.value }))}>
+                        <option value="">Select semester...</option>
+                        {[1,2,3,4,5,6,7,8].map(s => <option key={s} value={s}>Semester {s}</option>)}
+                      </select>
+                    </div>
+                  </>
+                )}
+              </div>
+              <div style={{ marginBottom:'0.75rem' }}>
+                <label style={{ display:'block', fontSize:'0.85rem', fontWeight:'600', color:'#4a5568', marginBottom:'4px' }}>Title *</label>
+                <input style={{ ...styles.input, width:'100%', boxSizing:'border-box' }}
+                  placeholder="Notification title..."
+                  value={notifForm.title}
+                  onChange={e => setNotifForm(p => ({ ...p, title: e.target.value }))}
+                  maxLength={200}
+                />
+              </div>
+              <div style={{ marginBottom:'0.75rem' }}>
+                <label style={{ display:'block', fontSize:'0.85rem', fontWeight:'600', color:'#4a5568', marginBottom:'4px' }}>Message *</label>
+                <textarea
+                  style={{ ...styles.input, width:'100%', boxSizing:'border-box', minHeight:'120px', resize:'vertical', fontFamily:'inherit' }}
+                  placeholder="Type your notification message here..."
+                  value={notifForm.message}
+                  onChange={e => setNotifForm(p => ({ ...p, message: e.target.value }))}
+                  maxLength={5000}
+                />
+                <span style={{ fontSize:'0.75rem', color:'#a0aec0' }}>{notifForm.message.length}/5000</span>
+              </div>
+              <div style={{ marginBottom:'1rem' }}>
+                <label style={{ display:'block', fontSize:'0.85rem', fontWeight:'600', color:'#4a5568', marginBottom:'4px' }}>
+                  Attachment (Image or PDF, max 5MB)
+                </label>
+                <input type="file" ref={notifFileRef}
+                  accept="image/jpeg,image/png,image/gif,image/webp,application/pdf"
+                  onChange={e => setNotifFile(e.target.files[0] || null)}
+                  style={{ fontSize:'0.9rem' }}
+                />
+                {notifFile && (
+                  <div style={{ marginTop:'8px', display:'flex', alignItems:'center', gap:'8px' }}>
+                    <span style={{ fontSize:'0.85rem', color:'#4a5568' }}>
+                      {notifFile.type === 'application/pdf' ? '📄' : '🖼️'} {notifFile.name} ({(notifFile.size / 1024).toFixed(1)} KB)
+                    </span>
+                    <button style={{ background:'none', border:'none', color:'#e53e3e', cursor:'pointer', fontWeight:'700' }}
+                      onClick={() => { setNotifFile(null); if (notifFileRef.current) notifFileRef.current.value = ''; }}>
+                      ✕ Remove
+                    </button>
+                  </div>
+                )}
+              </div>
+              <button
+                style={{ ...styles.addBtn, opacity: notifSending ? 0.6 : 1, padding:'0.7rem 2rem', fontSize:'0.95rem' }}
+                onClick={sendNotification}
+                disabled={notifSending}
+              >
+                {notifSending ? '⏳ Sending...' : notifForm.target === 'all' ? '🔔 Send to All Students' : '🔔 Send to Class'}
+              </button>
+            </div>
+
+            {/* Notifications list */}
+            <h3 style={{ color:'#2d3748' }}>Sent Notifications ({notifications.length})</h3>
+            {notifications.length === 0 ? (
+              <div style={{ background:'#fff', padding:'3rem', textAlign:'center', borderRadius:'12px', color:'#718096' }}>
+                No notifications sent yet.
+              </div>
+            ) : (
+              notifications.map(n => (
+                <div key={n.notification_id} style={{ background:'#fff', borderRadius:'10px', boxShadow:'0 2px 8px rgba(0,0,0,0.08)', marginBottom:'1rem', overflow:'hidden' }}>
+                  <div style={{ padding:'1rem 1.25rem', borderBottom:'1px solid #e2e8f0', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                    <div>
+                      <div style={{ display:'flex', alignItems:'center', gap:'8px' }}>
+                        <h4 style={{ margin:0, color:'#2d3748' }}>{n.title}</h4>
+                        <span style={{ fontSize:'0.7rem', fontWeight:'600', padding:'2px 8px', borderRadius:'999px', color:'#fff',
+                          background: n.target === 'all' ? '#4c51bf' : '#d97706' }}>
+                          {n.target === 'all' ? 'All Students' : `${n.programme_name} — Sem ${n.target_semester}`}
+                        </span>
+                      </div>
+                      <span style={{ fontSize:'0.8rem', color:'#a0aec0' }}>
+                        by {n.admin_name || 'Admin'} · {new Date(n.created_at).toLocaleString()}
+                      </span>
+                    </div>
+                    <button style={styles.delBtn} onClick={() => deleteNotification(n.notification_id)}>Delete</button>
+                  </div>
+                  <div style={{ padding:'1rem 1.25rem' }}>
+                    <p style={{ margin:0, color:'#4a5568', whiteSpace:'pre-wrap', lineHeight:'1.6' }}>{n.message}</p>
+                    {n.attachment_url && (
+                      <div style={{ marginTop:'0.75rem', padding:'0.75rem', background:'#f7fafc', borderRadius:'8px', border:'1px solid #e2e8f0' }}>
+                        {n.attachment_type === 'image' ? (
+                          <div>
+                            <img src={`${API_BASE}${n.attachment_url}`} alt="attachment"
+                              style={{ maxWidth:'100%', maxHeight:'300px', borderRadius:'6px', cursor:'pointer' }}
+                              onClick={() => window.open(`${API_BASE}${n.attachment_url}`, '_blank')}
+                            />
+                            <div style={{ fontSize:'0.8rem', color:'#718096', marginTop:'4px' }}>{n.attachment_name}</div>
+                          </div>
+                        ) : (
+                          <a href={`${API_BASE}${n.attachment_url}`} target="_blank" rel="noopener noreferrer"
+                            style={{ display:'inline-flex', alignItems:'center', gap:'6px', color:'#2b6cb0', fontWeight:'600', textDecoration:'none' }}>
+                            📄 {n.attachment_name || 'Download PDF'}
+                          </a>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         )}
       </div>
