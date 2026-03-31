@@ -3,7 +3,7 @@ const router    = express.Router();
 const db        = require('../db');
 const bcrypt    = require('bcryptjs');
 const jwt       = require('jsonwebtoken');
-const { v4: uuidv4 } = require('uuid');
+const crypto    = require('crypto');
 const { verify }     = require('../middleware/auth');
 const blacklist      = require('../middleware/tokenBlacklist');
 const { auditLog }   = require('../middleware/audit');
@@ -22,7 +22,7 @@ router.post('/login', async (req, res) => {
     if (!rows.length || !(await bcrypt.compare(password, rows[0].password))) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
-    const jti   = uuidv4();
+    const jti   = crypto.randomUUID();
     const token = jwt.sign(
       { id: rows[0].admin_id, role: 'admin', jti },
       process.env.JWT_SECRET,
