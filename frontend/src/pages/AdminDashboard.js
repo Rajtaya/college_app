@@ -650,12 +650,12 @@ export default function AdminDashboard({ admin, onLogout }) {
         'Semester': stu.semester,
       };
       subjects.forEach(sub => {
-        const subData = data.filter(d => d.roll_no === stu.roll_no && d.subject_code === sub.subject_code);
-        const total   = subData.total_classes || 0;
-        const present = subData.present || 0;
-        const absent  = subData.absent  || 0;
-        const late    = subData.late    || 0;
-        const pct     = subData.attendance_pct || 0;
+        const rec = data.find(d => d.roll_no === stu.roll_no && d.subject_code === sub.subject_code);
+        const total   = rec?.total_classes || 0;
+        const present = rec?.present || 0;
+        const absent  = rec?.absent  || 0;
+        const late    = rec?.late    || 0;
+        const pct     = rec?.attendance_pct || 0;
         row[`${sub.subject_code} Present`] = present;
         row[`${sub.subject_code} Absent`]  = absent;
         row[`${sub.subject_code} Late`]    = late;

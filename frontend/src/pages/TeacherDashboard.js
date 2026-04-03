@@ -498,7 +498,7 @@ export default function TeacherDashboard({ teacher, onLogout }) {
                               value={s.marks} placeholder="—"
                               onChange={e => { const u=[...classMarks]; u[i].marks=e.target.value; setClassMarks(u); }} />
                           </td>
-                          <td style={{...st.td, fontWeight:'600', color: pct>=60?'#276749':pct>=40?'#92400e':'#c53030'}}>
+                          <td style={{...st.td, fontWeight:'600', color: pct==='—'?'#a0aec0':pct>=60?'#276749':pct>=40?'#92400e':'#c53030'}}>
                             {pct !== '—' ? `${pct}%` : '—'}
                           </td>
                         </tr>

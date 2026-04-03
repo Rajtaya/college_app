@@ -342,7 +342,7 @@ router.get('/attendance/summary', async (req, res) => {
              SUM(CASE WHEN a.status = 'PRESENT' THEN 1 ELSE 0 END) as present,
              SUM(CASE WHEN a.status = 'ABSENT'  THEN 1 ELSE 0 END) as absent,
              SUM(CASE WHEN a.status = 'LEAVE'   THEN 1 ELSE 0 END) as on_leave,
-             ROUND((SUM(CASE WHEN a.status = 'PRESENT' THEN 1 ELSE 0 END) / COUNT(a.attendance_id)) * 100, 1) as attendance_pct
+             ROUND((SUM(CASE WHEN a.status = 'PRESENT' THEN 1 ELSE 0 END) / NULLIF(COUNT(a.attendance_id), 0)) * 100, 1) as attendance_pct
       FROM attendance a
       JOIN students st ON a.student_id = st.student_id
       JOIN subjects sub ON a.subject_id = sub.subject_id
@@ -411,7 +411,7 @@ router.get('/fees/summary', async (req, res) => {
        JOIN students s ON f.student_id = s.student_id
        LEFT JOIN programmes p ON s.programme_id = p.programme_id
        LEFT JOIN levels l ON s.level_id = l.level_id
-       GROUP BY p.programme_id
+       GROUP BY p.programme_id, l.level_name, p.programme_name
        ORDER BY l.level_name, p.programme_name`
     );
     res.json(rows);
@@ -485,7 +485,7 @@ router.get('/marks/export', async (req, res) => {
              p.programme_name, l.level_name, st.semester,
              sub.subject_code, sub.subject_name, sub.category, sub.credits,
              m.exam_type, m.marks_obtained, m.max_marks,
-             ROUND((m.marks_obtained / m.max_marks) * 100, 1) as percentage
+             ROUND((m.marks_obtained / NULLIF(m.max_marks, 0)) * 100, 1) as percentage
       FROM marks m
       JOIN students st ON m.student_id = st.student_id
       JOIN subjects sub ON m.subject_id = sub.subject_id
@@ -673,7 +673,7 @@ router.post('/enrollment/import', async (req, res) => {
   const subMap = Object.fromEntries(subRows.map(s => [s.subject_code.trim(), s.subject_id]));
 
   // ── Pass 3: execute all valid rows inside a single transaction ─────────────
-  let success = 0, failed = errors.length;
+  let success = 0, failed = 0;
   const conn = await db.getConnection();
   try {
     await conn.beginTransaction();

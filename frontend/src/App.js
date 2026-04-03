@@ -26,15 +26,14 @@ export default function App() {
     setStudent(null); setAdmin(null); setTeacher(null);
   };
 
-  const handleStudentUpdate = (updatedData) => {
-    const merged = { ...student, ...updatedData };
-    setStudent(merged);
-    localStorage.setItem('student', JSON.stringify(merged));
-  };
-
   if (mode === 'admin' && admin) return <AdminDashboard admin={admin} onLogout={handleLogout} />;
   if (mode === 'teacher' && teacher) return <TeacherDashboard teacher={teacher} onLogout={handleLogout} />;
-  if (mode === 'student' && student) return <Dashboard student={student} onLogout={handleLogout} onStudentUpdate={handleStudentUpdate} />;
+  if (mode === 'student' && student) return <Dashboard student={student} onLogout={handleLogout}
+    onStudentUpdate={(updated) => {
+      const merged = {...student, ...updated};
+      setStudent(merged);
+      localStorage.setItem('student', JSON.stringify(merged));
+    }} />;
 
   return (
     <div>

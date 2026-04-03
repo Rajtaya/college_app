@@ -85,7 +85,7 @@ router.get('/student/:student_id/summary', async (req, res) => {
       `SELECT s.subject_id, s.subject_name, s.subject_code,
               COUNT(*) AS total,
               SUM(a.status = 'PRESENT') AS present,
-              ROUND(SUM(a.status = 'PRESENT') / COUNT(*) * 100, 1) AS percentage
+              ROUND(SUM(a.status = 'PRESENT') / NULLIF(COUNT(*), 0) * 100, 1) AS percentage
        FROM attendance a
        JOIN subjects s ON a.subject_id = s.subject_id
        WHERE a.student_id = ?

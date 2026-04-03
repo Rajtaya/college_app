@@ -62,19 +62,21 @@ export default function StudentEnrollment({ student, onBack }) {
     : `✅ DEC valid: Finance=${decFinance}, HR=${decHR}, Marketing=${decMarketing}`;
 
   const categoryRules = {
-    MAJOR:              '🔒 Pre-assigned by college. These are your Discipline Specific Courses (DSC).',
-    MIC:                '⚠️ Select exactly 1 subject. Must be from a different discipline than your MAJOR.',
-    VAC:                '⚠️ Select exactly 1 subject.',
-    AEC:                '⚠️ Select exactly 1 subject.',
-    MDC:                '⚠️ Select 1 group only. For 3-credit: select 1 subject. For 2-credit: select both Theory(T) + Practical(P) together. Must be from a different discipline than your MAJOR.',
-    SEC:                isPG ? '📌 Select exactly 1 SEC subject.' : '📌 Select 1 subject totalling exactly 3 credits (standalone Theory OR Theory+Practical pair).',
-    ELECTIVE:           '⚠️ Select exactly 1 subject from the options below.',
+    MAJOR:              '🔒 Pre-assigned by college. Cannot be changed or rejected.',
+    MIC:                '⚠️ Select 1 subject (2 credits). Must NOT be from your MAJOR discipline.',
+    VAC:                '⚠️ Select 1 subject (2 credits). Available semesters depend on your scheme.',
+    AEC:                '⚠️ Select 1 subject (2 credits). Can be from any discipline.',
+    MDC:                '⚠️ Select 1 subject (3 credits). Must NOT be from your MAJOR discipline. T+P auto-paired for 2-credit subjects.',
+    SEC:                isPG
+                          ? '📌 Select 1 subject. No discipline restriction.'
+                          : '📌 Select 1 subject (3 credits). T+P auto-paired for 2-credit subjects. No discipline restriction.',
+    ELECTIVE:           '⚠️ Select 1 subject from the options below.',
     ELECTIVE_FINANCE:   decMsg,
     ELECTIVE_HR:        decMsg,
     ELECTIVE_MARKETING: decMsg,
-    SEMINAR:            '🔒 Compulsory. Pre-selected.',
-    INTERNSHIP:         '🔒 Compulsory. Pre-selected.',
-    OEC:                '⚠️ Select exactly 1 subject.',
+    SEMINAR:            '🔒 Compulsory. Pre-selected, cannot be rejected.',
+    INTERNSHIP:         '🔒 Compulsory. Pre-selected, cannot be rejected.',
+    OEC:                '⚠️ Select 1 subject. Can be from any discipline.',
   };
 
   useEffect(() => { fetchData(); }, []);
@@ -88,8 +90,10 @@ export default function StudentEnrollment({ student, onBack }) {
       ]);
       setSubjects(subRes.data);
       // Only use live enrollment data — never trust stale localStorage
-     const hasNonDraft = enrollRes.data.some(e => e.is_draft === 0 && e.status !== 'PENDING' && !e.admin_modified);
-      setSubmitted(hasNonDraft);
+     // Submitted if: student formally submitted OR admin finalized (no PENDING left)
+      const hasPending = enrollRes.data.some(e => e.status === 'PENDING');
+      const hasFinalized = enrollRes.data.some(e => e.is_draft === 0 && e.status !== 'PENDING');
+      setSubmitted(!!student.enrollment_submitted || (hasFinalized && !hasPending));
 
       const enrollState = {};
       subRes.data.forEach(s => {
@@ -526,7 +530,7 @@ export default function StudentEnrollment({ student, onBack }) {
         ))}
       </div>
 
-      {categoryOrder.filter(cat => grouped[cat]).map(category => {
+      {categoryOrder.filter(cat => grouped[cat] && (!submitted || countAccepted(cat) > 0)).map(category => {
         const fixed = isFixedSubject(category);
         return (
           <div key={category} style={s.categoryBlock}>
@@ -534,7 +538,10 @@ export default function StudentEnrollment({ student, onBack }) {
               <div>
                 <span style={s.catTitle}>{categoryLabels[category]||category}</span>
                 <span style={s.catCount}>
-                  {grouped[category].filter(sub => sub.pair_type !== 'PRACTICAL').length} subject{grouped[category].filter(sub => sub.pair_type !== 'PRACTICAL').length !== 1 ? 's' : ''}
+                  {submitted
+                    ? `${countAccepted(category)} subject${countAccepted(category) !== 1 ? 's' : ''}`
+                    : `${grouped[category].filter(sub => sub.pair_type !== 'PRACTICAL').length} subject${grouped[category].filter(sub => sub.pair_type !== 'PRACTICAL').length !== 1 ? 's' : ''}`
+                  }
                 </span>
                 {fixed && <span style={s.fixedBadge}>🔒 Compulsory</span>}
               </div>

@@ -86,8 +86,8 @@ router.get('/subjects/:student_id', async (req, res) => {
     const isPG   = student.level_name === 'PG';
     const scheme = student.scheme || 'A';
 
-    // Get discipline IDs from student's ACCEPTED MAJOR subjects
-    // This is used to EXCLUDE from MDC/MIC (student cannot pick same discipline as their major)
+    // Get discipline IDs that count as student's MAJOR — used to EXCLUDE from MDC/MIC
+    // Sources: 1) ACCEPTED MAJOR enrollment, 2) student_disciplines, 3) programme MAJOR subjects
     let majorDisciplineIds = [];
     if (!isPG) {
       const [majDisc] = await db.query(
@@ -100,7 +100,17 @@ router.get('/subjects/:student_id', async (req, res) => {
       );
       majorDisciplineIds = majDisc.map(r => r.discipline_id);
 
-      // Fallback: if no accepted major yet, use programme's discipline
+      // Also include disciplines pre-assigned to the student (student_disciplines table)
+      const [studentDisc] = await db.query(
+        `SELECT DISTINCT discipline_id FROM student_disciplines WHERE student_id = ?`,
+        [req.params.student_id]
+      );
+      studentDisc.forEach(r => {
+        if (r.discipline_id && !majorDisciplineIds.includes(r.discipline_id))
+          majorDisciplineIds.push(r.discipline_id);
+      });
+
+      // Fallback: if still empty, use programme's MAJOR subjects' disciplines
       if (majorDisciplineIds.length === 0) {
         const [progDisc] = await db.query(
           `SELECT DISTINCT s.discipline_id
@@ -204,7 +214,7 @@ router.get('/status/:student_id', async (req, res) => {
   try {
     const [rows] = await db.query(
       `SELECT e.*, e.is_draft, s.subject_code, s.subject_name, s.category,
-              s.credits, s.internal_marks, d.discipline_name
+              s.credits, s.internal_marks, s.semester AS subject_semester, d.discipline_name
        FROM student_subject_enrollment e
        JOIN subjects s ON e.subject_id = s.subject_id
        LEFT JOIN disciplines d ON s.discipline_id = d.discipline_id
