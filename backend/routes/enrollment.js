@@ -212,15 +212,17 @@ router.get('/subjects/:student_id', async (req, res) => {
 router.get('/status/:student_id', async (req, res) => {
   if (!canAccessStudent(req, res, req.params.student_id)) return;
   try {
+    const student = await getStudent(req.params.student_id);
+    if (!student) return res.status(404).json({ error: 'Student not found' });
     const [rows] = await db.query(
       `SELECT e.*, e.is_draft, s.subject_code, s.subject_name, s.category,
               s.credits, s.internal_marks, s.semester AS subject_semester, d.discipline_name
        FROM student_subject_enrollment e
        JOIN subjects s ON e.subject_id = s.subject_id
        LEFT JOIN disciplines d ON s.discipline_id = d.discipline_id
-       WHERE e.student_id = ?
+       WHERE e.student_id = ? AND s.semester = ?
        ORDER BY s.category, s.subject_code`,
-      [req.params.student_id]
+      [req.params.student_id, student.semester]
     );
     res.json(rows);
   } catch (err) { res.status(500).json({ error: "Internal server error" }); }
@@ -231,15 +233,15 @@ router.post('/save-draft/:student_id', verify('student', 'admin'), async (req, r
   if (!canAccessStudent(req, res, req.params.student_id)) return;
   const { decisions } = req.body;
   try {
-    const [studentRows] = await db.query(
-      'SELECT student_id FROM students WHERE student_id = ?', [req.params.student_id]
-    );
-    if (!studentRows.length) return res.status(404).json({ error: 'Student not found' });
-    // Check for non-draft submitted records instead of relying on flag
+    const student = await getStudent(req.params.student_id);
+    if (!student) return res.status(404).json({ error: 'Student not found' });
+    // Check for non-draft submitted records in CURRENT semester only
     // Exclude admin-modified records — those shouldn't lock student enrollment
     const [submittedCheck] = await db.query(
-      'SELECT COUNT(*) as count FROM student_subject_enrollment WHERE student_id = ? AND is_draft = 0 AND admin_modified = 0',
-      [req.params.student_id]
+      `SELECT COUNT(*) as count FROM student_subject_enrollment e
+       JOIN subjects s ON e.subject_id = s.subject_id
+       WHERE e.student_id = ? AND e.is_draft = 0 AND e.admin_modified = 0 AND s.semester = ?`,
+      [req.params.student_id, student.semester]
     );
     if (submittedCheck[0].count > 0)
       return res.status(400).json({ error: 'Enrollment already submitted and locked' });
@@ -277,10 +279,12 @@ router.post('/submit/:student_id', verify('student', 'admin'), async (req, res) 
     const scheme = student.scheme || 'A';
     const sem    = student.semester;
 
-    // Block re-submission — only block if student has already submitted (not admin-modified)
+    // Block re-submission — only block if student has already submitted for CURRENT semester
     const [existing] = await db.query(
-      'SELECT COUNT(*) AS count FROM student_subject_enrollment WHERE student_id = ? AND is_draft = 0 AND admin_modified = 0',
-      [req.params.student_id]
+      `SELECT COUNT(*) AS count FROM student_subject_enrollment e
+       JOIN subjects s ON e.subject_id = s.subject_id
+       WHERE e.student_id = ? AND e.is_draft = 0 AND e.admin_modified = 0 AND s.semester = ?`,
+      [req.params.student_id, sem]
     );
     if (existing[0].count > 0) {
       return res.status(400).json({ error: 'Already submitted. Contact admin to reset.' });
@@ -560,11 +564,13 @@ router.post('/submit/:student_id', verify('student', 'admin'), async (req, res) 
     }
 
     // ── Save ──────────────────────────────────────────────────────────────────
-    // Delete all draft records (both PENDING and ACCEPTED drafts) before final save
-    // But preserve admin-modified records
+    // Delete current-semester draft records before final save
+    // But preserve admin-modified records and other semesters
     await db.query(
-      'DELETE FROM student_subject_enrollment WHERE student_id = ? AND is_draft = 1 AND admin_modified = 0',
-      [req.params.student_id]
+      `DELETE e FROM student_subject_enrollment e
+       JOIN subjects s ON e.subject_id = s.subject_id
+       WHERE e.student_id = ? AND e.is_draft = 1 AND e.admin_modified = 0 AND s.semester = ?`,
+      [req.params.student_id, sem]
     );
 
     // Fetch all admin-modified subject IDs in one query — avoids N+1 loop
@@ -612,6 +618,63 @@ router.post("/enroll-semester", verify("admin"), async (req, res) => {
     const isError = result.message && result.message.startsWith("ERROR");
     res.status(isError ? 400 : 200).json(result);
   } catch (err) { res.status(500).json({ error: "Internal server error" }); }
+});
+
+
+// ── POST /bulk-import — Bulk import enrollment from Excel (admin only) ──────
+router.post('/bulk-import', verify('admin'), async (req, res) => {
+  const { enrollments } = req.body;
+  if (!Array.isArray(enrollments) || enrollments.length === 0) {
+    return res.status(400).json({ error: 'No enrollment data provided' });
+  }
+
+  let success = 0, failed = 0;
+  const errors = [];
+
+  for (const row of enrollments) {
+    const { roll_no, subjects } = row;
+    if (!roll_no || !subjects || !subjects.length) { failed++; continue; }
+
+    // Find student
+    const [stuRows] = await db.query('SELECT student_id, programme_id, semester FROM students WHERE roll_no = ?', [roll_no]);
+    if (!stuRows.length) { failed++; errors.push({ roll_no, error: 'Student not found' }); continue; }
+    const student = stuRows[0];
+
+    // Get current academic year
+    const [ayRows] = await db.query('SELECT academic_year_id FROM academic_years WHERE is_current = 1 LIMIT 1');
+    const academic_year_id = ayRows.length ? ayRows[0].academic_year_id : null;
+
+    for (const subject_code of subjects) {
+      if (!subject_code) continue;
+      // Find subject in programme_subject_pool
+      const [subRows] = await db.query(
+        `SELECT psp.subject_id FROM programme_subject_pool psp
+         JOIN subjects s ON psp.subject_id = s.subject_id
+         WHERE s.subject_code = ? AND psp.programme_id = ?`,
+        [subject_code, student.programme_id]
+      );
+      if (!subRows.length) {
+        // Try without programme filter
+        const [subRows2] = await db.query('SELECT subject_id FROM subjects WHERE subject_code = ?', [subject_code]);
+        if (!subRows2.length) { errors.push({ roll_no, error: `Subject not found: ${subject_code}` }); continue; }
+        var subject_id = subRows2[0].subject_id;
+      } else {
+        var subject_id = subRows[0].subject_id;
+      }
+
+      try {
+        await db.query(
+          `INSERT INTO student_subject_enrollment (student_id, subject_id, semester, academic_year_id, status, is_draft)
+           VALUES (?, ?, ?, ?, 'ACCEPTED', 0)
+           ON DUPLICATE KEY UPDATE status = 'ACCEPTED', is_draft = 0`,
+          [student.student_id, subject_id, student.semester, academic_year_id]
+        );
+        success++;
+      } catch (e) { errors.push({ roll_no, error: `${subject_code}: ${e.message}` }); }
+    }
+  }
+
+  res.json({ success, failed, errors: errors.slice(0, 30) });
 });
 
 module.exports = router;

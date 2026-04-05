@@ -299,6 +299,32 @@ export default function AdminDashboard({ admin, onLogout }) {
     } catch(e) { showMsg('Export failed', 'error'); }
   };
 
+  // Import enrollment from Excel
+  const handleImportEnrollment = async (e) => {
+    const file = e.target.files[0]; if (!file) return; setImporting(true);
+    try {
+      const data = await file.arrayBuffer(); const wb = XLSX.read(data);
+      const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
+      const enrollments = rows.map(row => {
+        const subjects = [];
+        for (let i = 1; i <= 12; i++) {
+          const code = row[`DSC-${i}`];
+          if (code) subjects.push(String(code).trim());
+        }
+        return { roll_no: String(row.roll_no || ''), subjects };
+      }).filter(r => r.roll_no && r.subjects.length > 0);
+
+      const res = await API.post('/enrollment/bulk-import', { enrollments });
+      const { success, failed, errors } = res.data;
+      if (errors?.length) console.warn('Enrollment import errors:', errors);
+      showMsg(`✅ Enrolled ${success} subjects${failed ? `, ❌ ${failed} students failed` : ''}`, failed ? 'warning' : 'success');
+      fetchEnrollmentSummary();
+    } catch (err) { showMsg('Import failed: ' + (err.response?.data?.error || err.message), 'error'); }
+    finally { setImporting(false); e.target.value = ''; }
+  };
+
+
+
   // ── Enrollment Export Functions ──────────────────────────────────────────
   const exportEnrollmentSummary = () => {
     const rows = enrollmentSummary.map(s => ({
@@ -1180,38 +1206,29 @@ export default function AdminDashboard({ admin, onLogout }) {
       const levelMap = {}; levels.forEach(l => { levelMap[l.level_name.toUpperCase()] = l.level_id; });
       const progMap = {}; programmes.forEach(p => { progMap[p.programme_name.toLowerCase()] = p.programme_id; });
       const facMap = {}; faculties.forEach(f => { facMap[f.faculty_name.toLowerCase()] = f.faculty_id; });
-      let success = 0, failed = 0;
-      for (const row of rows) {
-        try {
-          const studentRes = await API.post('/students', {
-            roll_no: String(row.roll_no||''), name: String(row.name||''),
-            email: String(row.email||''), phone: String(row.phone||''),
-            course: String(row.programme_name||''),
-            semester: Number(row.semester||1), year: Number(row.year||1),
-            password: String(row.password||'password123'),
-            level_id: levelMap[String(row.level_name||'').toUpperCase()] || null,
-            programme_id: progMap[String(row.programme_name||'').toLowerCase()] || null,
-            faculty_id: facMap[String(row.faculty_name||'').toLowerCase()] || null,
-          });
-          // Assign disciplines if provided (Scheme A/B students)
-          const discNames = [row.discipline_1, row.discipline_2, row.discipline_3].filter(Boolean);
-          if (discNames.length > 0 && studentRes.data?.student_id) {
-            const discRes = await API.get('/disciplines');
-            const discMap = {};
-            discRes.data.forEach(d => { discMap[d.discipline_name.toLowerCase()] = d.discipline_id; });
-            const discIds = discNames.map(n => discMap[String(n).toLowerCase()]).filter(Boolean);
-            if (discIds.length > 0) {
-              await API.post(`/admin/students/${studentRes.data.student_id}/disciplines`, { discipline_ids: discIds });
-            }
-          }
-          success++;
-        } catch { failed++; }
-      }
-      showMsg(`✅ Imported ${success} students${failed?`, ❌ ${failed} failed`:''}`, failed?'warning':'success');
-      fetchStudents();
-    } catch { showMsg('Failed!','error'); } finally { setImporting(false); e.target.value=''; }
-  };
 
+      const students = rows.map(row => ({
+        roll_no: String(row.roll_no || ''),
+        first_name: String(row.name || row.first_name || ''),
+        last_name: String(row.last_name || ''),
+        email: String(row.email || ''),
+        phone: String(row.phone || ''),
+        semester: Number(row.semester || 1),
+        study_year: Number(row.year || row.study_year || 1),
+        password: row.password ? String(row.password) : undefined,
+        level_id: levelMap[String(row.level_name || '').toUpperCase()] || null,
+        programme_id: progMap[String(row.programme_name || '').toLowerCase()] || null,
+        faculty_id: facMap[String(row.faculty_name || '').toLowerCase()] || null,
+      }));
+
+      const res = await API.post('/students/bulk', { students });
+      const { success, failed, errors } = res.data;
+      if (errors?.length) console.warn('Import errors:', errors);
+      showMsg(`✅ Imported ${success} students${failed ? `, ❌ ${failed} failed` : ''}`, failed ? 'warning' : 'success');
+      fetchStudents();
+    } catch (err) { showMsg('Import failed: ' + (err.response?.data?.error || err.message), 'error'); }
+    finally { setImporting(false); e.target.value = ''; }
+  };
   const handleImportTeachers = async (e) => {
     const file = e.target.files[0]; if (!file) return; setImporting(true);
     try {
@@ -1759,6 +1776,7 @@ export default function AdminDashboard({ admin, onLogout }) {
                       <button style={{...styles.templateBtn,whiteSpace:'nowrap'}} onClick={handleExportEvenSemesters}>📋 Even Sem (2,4,6,8)</button>
                       <button style={{...styles.templateBtn,whiteSpace:'nowrap'}} onClick={exportEnrollmentDetail}>📄 Full Detail</button>
                       <button style={{...styles.templateBtn,whiteSpace:'nowrap'}} onClick={exportSubjectWise}>📚 Subject-wise</button>
+                      <label style={{...styles.templateBtn,whiteSpace:'nowrap',background:'#2b6cb0',color:'#fff',cursor:'pointer',margin:0}}>📤 Import Enrollment <input type="file" accept=".xlsx,.xls" hidden onChange={handleImportEnrollment}/></label>
                     </div>
                   </div>
                   {/* Stats bar */}

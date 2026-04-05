@@ -314,7 +314,7 @@ export default function TeacherDashboard({ teacher, onLogout }) {
                     <label style={st.label}>Subject *</label>
                     <select style={st.select} value={addForm.subject_id} onChange={e => setAddForm(p => ({...p, subject_id: e.target.value}))}>
                       <option value="">Select subject...</option>
-                      {allSubjects.map(s => (
+                      {subjects.map(s => (
                         <option key={s.subject_id} value={s.subject_id}>
                           {s.subject_code} — {s.subject_name.substring(0,30)}
                         </option>

@@ -77,7 +77,59 @@ router.get('/:id/profile', async (req, res) => {
   } catch (err) { console.error(err); res.status(500).json({ error: 'Internal server error' }); }
 });
 
+// ── POST /bulk — Bulk import students (admin only) ──────────────────────────
+router.post('/bulk', verify('admin'), async (req, res) => {
+  const { students } = req.body;
+  if (!Array.isArray(students) || students.length === 0) {
+    return res.status(400).json({ error: 'No students provided' });
+  }
+
+  // Hash ALL passwords in parallel (fast)
+  const prepared = await Promise.all(students.map(async (s) => {
+    const namePart = (s.first_name || s.name || 'user').replace(/\s/g, '').toLowerCase().slice(0, 4);
+    const rollPart = String(s.roll_no || '').slice(-4);
+    const rawPass = s.password || (namePart + rollPart);
+    const hashed = await bcrypt.hash(rawPass, 8);
+    return [
+      s.roll_no, s.first_name || s.name || '', s.last_name || '',
+      s.email || null, s.phone || null,
+      s.semester || 1, s.study_year || 1, hashed,
+      s.level_id || null, s.programme_id || null, s.faculty_id || null,
+      s.academic_year_id || null, s.abc_id || null
+    ];
+  }));
+
+  let success = 0, failed = 0;
+  const errors = [];
+  const BATCH = 50;
+
+  for (let i = 0; i < prepared.length; i += BATCH) {
+    const batch = prepared.slice(i, i + BATCH);
+    const placeholders = batch.map(() => '(?,?,?,?,?,?,?,?,?,?,?,?,?)').join(',');
+    const values = batch.flat();
+    try {
+      await db.query(
+        `INSERT INTO students (roll_no, first_name, last_name, email, phone, semester, study_year, password, level_id, programme_id, faculty_id, academic_year_id, abc_id) VALUES ${placeholders}`,
+        values
+      );
+      success += batch.length;
+    } catch (err) {
+      for (const sv of batch) {
+        try {
+          await db.query(
+            `INSERT INTO students (roll_no, first_name, last_name, email, phone, semester, study_year, password, level_id, programme_id, faculty_id, academic_year_id, abc_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+            sv
+          );
+          success++;
+        } catch (e2) { failed++; errors.push({ roll_no: sv[0], error: e2.message }); }
+      }
+    }
+  }
+
+  res.json({ success, failed, errors: errors.slice(0, 20) });
+});
 // ── POST / — Add a student (admin only) ────────────────────────────────────
+
 router.post('/', verify('admin'), async (req, res) => {
   const {
     roll_no, first_name, last_name, email, phone,

@@ -65,6 +65,7 @@ router.delete('/students/:id', async (req, res) => {
   try {
     const [check] = await db.query('SELECT student_id, roll_no FROM students WHERE student_id = ?', [id]);
     if (!check.length) return res.status(404).json({ error: 'Student not found' });
+    await db.query('DELETE FROM student_disciplines WHERE student_id = ?', [id]);
     await db.query('DELETE FROM student_subject_enrollment WHERE student_id = ?', [id]);
     await db.query('DELETE FROM attendance WHERE student_id = ?', [id]);
     await db.query('DELETE FROM marks WHERE student_id = ?', [id]);
@@ -282,15 +283,25 @@ router.post('/subjects', async (req, res) => {
 
 router.delete('/subjects/:id', async (req, res) => {
   const id = req.params.id;
+  const conn = await db.getConnection();
   try {
-    await db.query('DELETE FROM student_subject_enrollment WHERE subject_id = ?', [id]);
-    await db.query('DELETE FROM attendance WHERE subject_id = ?', [id]);
-    await db.query('DELETE FROM marks WHERE subject_id = ?', [id]);
-    await db.query('DELETE FROM programme_subject_pool WHERE subject_id = ?', [id]);
+    await conn.beginTransaction();
+    await conn.query('DELETE FROM student_subject_enrollment WHERE subject_id = ?', [id]);
+    await conn.query('DELETE FROM attendance WHERE subject_id = ?', [id]);
+    await conn.query('DELETE FROM marks WHERE subject_id = ?', [id]);
+    await conn.query('DELETE FROM notifications WHERE subject_id = ?', [id]);
+    await conn.query('DELETE FROM programme_subject_pool WHERE subject_id = ?', [id]);
     // subject_teachers has ON DELETE CASCADE
-    await db.query('DELETE FROM subjects WHERE subject_id = ?', [id]);
+    await conn.query('DELETE FROM subjects WHERE subject_id = ?', [id]);
+    await conn.commit();
     res.json({ message: 'Subject deleted' });
-  } catch (err) { console.error(err); res.status(500).json({ error: 'Internal server error' }); }
+  } catch (err) {
+    await conn.rollback();
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  } finally {
+    conn.release();
+  }
 });
 
 // ── ATTENDANCE ────────────────────────────────────────────────────────────────
@@ -519,6 +530,7 @@ router.get('/enrollment/summary', async (req, res) => {
               MAX(e.admin_modified) as admin_modified
        FROM students st
        LEFT JOIN student_subject_enrollment e ON st.student_id = e.student_id
+         AND e.subject_id IN (SELECT sub.subject_id FROM subjects sub WHERE sub.semester = st.semester)
        LEFT JOIN programmes p ON st.programme_id = p.programme_id
        LEFT JOIN levels l ON st.level_id = l.level_id
        GROUP BY st.student_id
@@ -713,26 +725,35 @@ router.post('/enrollment/import', async (req, res) => {
 
 router.put('/enrollment/bulkupdate/:student_id', async (req, res) => {
   const { changes, admin_note } = req.body;
+  const conn = await db.getConnection();
   try {
+    await conn.beginTransaction();
     for (const change of changes) {
-      const [existing] = await db.query(
+      const [existing] = await conn.query(
         'SELECT enrollment_id FROM student_subject_enrollment WHERE student_id = ? AND subject_id = ?',
         [req.params.student_id, change.subject_id]
       );
       if (existing.length) {
-        await db.query(
+        await conn.query(
           'UPDATE student_subject_enrollment SET status = ?, admin_modified = 1, is_draft = 0, admin_note = ? WHERE student_id = ? AND subject_id = ?',
           [change.status, admin_note || '', req.params.student_id, change.subject_id]
         );
       } else {
-        await db.query(
+        await conn.query(
           'INSERT INTO student_subject_enrollment (student_id, subject_id, status, admin_modified, admin_note, is_draft) VALUES (?, ?, ?, 1, ?, 0)',
           [req.params.student_id, change.subject_id, change.status, admin_note || 'Added by admin']
         );
       }
     }
+    await conn.commit();
     res.json({ message: `${changes.length} subject(s) updated successfully` });
-  } catch (err) { console.error(err); res.status(500).json({ error: 'Internal server error' }); }
+  } catch (err) {
+    await conn.rollback();
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  } finally {
+    conn.release();
+  }
 });
 
 router.get('/enrollment/reset-check/:student_id', async (req, res) => {
@@ -753,7 +774,15 @@ router.get('/enrollment/reset-check/:student_id', async (req, res) => {
 
 router.delete('/enrollment/reset/:student_id', async (req, res) => {
   try {
-    await db.query('DELETE FROM student_subject_enrollment WHERE student_id = ?', [req.params.student_id]);
+    // Only reset current semester enrollment, not all semesters
+    const [[student]] = await db.query('SELECT semester FROM students WHERE student_id = ?', [req.params.student_id]);
+    if (!student) return res.status(404).json({ error: 'Student not found' });
+    await db.query(
+      `DELETE e FROM student_subject_enrollment e
+       JOIN subjects s ON e.subject_id = s.subject_id
+       WHERE e.student_id = ? AND s.semester = ?`,
+      [req.params.student_id, student.semester]
+    );
     await db.query('UPDATE students SET enrollment_submitted = 0 WHERE student_id = ?', [req.params.student_id]);
     auditLog(req, 'ENROLLMENT_RESET', 'student_subject_enrollment', req.params.student_id);
     res.json({ message: 'Enrollment reset successfully!' });
