@@ -295,7 +295,7 @@ export default function TeacherDashboard({ teacher, onLogout }) {
         {/* SUBJECTS TAB */}
         {activeTab === 'subjects' && (
           <div>
-            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'1.5rem' }}>
+            <div className="erp-card-header" style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'1.5rem' }}>
               <div>
                 <h2 style={{ margin:0 }}>📚 My Subject Assignments</h2>
                 <p style={{ color:'#718096', margin:'0.25rem 0 0' }}>{Object.keys(groupedSubjects).length} subjects · {subjects.length} total assignments</p>
@@ -466,7 +466,7 @@ export default function TeacherDashboard({ teacher, onLogout }) {
 
               {classMarks.length > 0 && (
                 <div>
-                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'0.75rem'}}>
+                  <div className="erp-card-header" style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'0.75rem'}}>
                     <span style={{fontSize:'0.85rem',color:'#718096',fontWeight:'600'}}>{classMarks.length} students loaded</span>
                     <button style={{...st.saveBtn,margin:0,padding:'0.5rem 1.25rem'}} onClick={submitMarks}>💾 Save All Marks</button>
                   </div>
@@ -678,7 +678,7 @@ export default function TeacherDashboard({ teacher, onLogout }) {
             ) : (
               notifications.map(n => (
                 <div key={n.notification_id} style={{ background:'#fff', borderRadius:'10px', boxShadow:'0 2px 8px rgba(0,0,0,0.08)', marginBottom:'1rem', overflow:'hidden' }}>
-                  <div style={{ padding:'1rem 1.25rem', borderBottom:'1px solid #e2e8f0', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                  <div className="erp-card-header" style={{ padding:'1rem 1.25rem', borderBottom:'1px solid #e2e8f0', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
                     <div>
                       <div style={{ display:'flex', alignItems:'center', gap:'8px' }}>
                         <h4 style={{ margin:0, color:'#2d3748' }}>{n.title}</h4>
