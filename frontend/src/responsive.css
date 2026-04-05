@@ -1,0 +1,88 @@
+/* COLLEGE ERP — RESPONSIVE CSS */
+
+/* NAV */
+.erp-nav { display:flex; justify-content:space-between; align-items:center; }
+@media (max-width:600px) {
+  .erp-nav { flex-wrap:wrap; padding:0.75rem 1rem !important; gap:0.5rem; }
+  .erp-nav h2 { font-size:1rem !important; width:100%; }
+}
+
+/* TABS */
+.erp-tabs { overflow-x:auto; -webkit-overflow-scrolling:touch; scrollbar-width:none; }
+.erp-tabs::-webkit-scrollbar { display:none; }
+.erp-tabs button { white-space:nowrap; flex-shrink:0; }
+@media (max-width:600px) {
+  .erp-tabs { padding:0 0.5rem !important; }
+  .erp-tabs button { padding:0.65rem 0.8rem !important; font-size:0.82rem !important; }
+}
+
+/* CONTENT */
+@media (max-width:768px) { .erp-content { padding:1rem !important; } }
+@media (max-width:480px) { .erp-content { padding:0.75rem !important; } }
+
+/* CARDS */
+@media (max-width:600px) { .erp-card { padding:1rem !important; border-radius:8px !important; } }
+
+/* CARD HEADER */
+.erp-card-header { display:flex; justify-content:space-between; align-items:center; gap:0.75rem; flex-wrap:wrap; }
+@media (max-width:600px) { .erp-card-header { flex-direction:column; align-items:flex-start; } }
+
+/* FORM GRIDS */
+.erp-form-grid { display:grid; gap:12px; align-items:end; }
+@media (max-width:768px) {
+  .erp-form-grid-3, .erp-form-grid-4, .erp-form-grid-2 { grid-template-columns:1fr !important; }
+}
+
+/* STATS GRID */
+.erp-stats-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:1rem; }
+@media (max-width:600px) { .erp-stats-grid { grid-template-columns:repeat(2,1fr); gap:0.75rem; } }
+@media (max-width:380px) { .erp-stats-grid { grid-template-columns:1fr; } }
+
+/* TABLES */
+.erp-table-wrap { overflow-x:auto; -webkit-overflow-scrolling:touch; }
+@media (max-width:768px) {
+  .erp-table-wrap table { font-size:0.8rem; white-space:nowrap; }
+  .erp-table-wrap th, .erp-table-wrap td { padding:0.4rem 0.5rem !important; }
+}
+
+/* SUBJECT HEADER */
+@media (max-width:600px) {
+  .erp-subject-header { flex-direction:column !important; align-items:flex-start !important; gap:0.5rem; padding:10px 12px !important; }
+}
+
+/* BUTTON ROWS */
+.erp-btn-row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+@media (max-width:600px) { .erp-btn-row { width:100%; } .erp-btn-row > button { flex:1; text-align:center; } }
+
+/* SEARCH */
+@media (max-width:600px) { .erp-search { width:100% !important; } }
+
+/* LOGIN TOGGLE */
+.erp-login-toggle { display:flex; justify-content:center; gap:1rem; padding:1.5rem; background:#1a202c; }
+@media (max-width:500px) {
+  .erp-login-toggle { flex-wrap:wrap; gap:0.4rem; padding:0.75rem; }
+  .erp-login-toggle button { padding:0.5rem 0.75rem !important; font-size:0.8rem !important; flex:1 1 40%; }
+}
+
+/* LOGIN FORM */
+@media (max-width:500px) { .erp-login-form { width:92vw !important; padding:1.25rem !important; } }
+
+/* GRADIENT HEADER (Clerk) */
+@media (max-width:600px) {
+  .erp-gradient-header { flex-direction:column !important; padding:1rem !important; gap:0.5rem; text-align:center; }
+  .erp-gradient-header h1 { font-size:1.1rem !important; }
+}
+
+/* MODAL */
+@media (max-width:600px) { .erp-modal { max-width:98% !important; width:98% !important; margin:0.5rem !important; padding:1rem !important; } }
+
+/* iOS zoom prevention */
+@media (max-width:768px) { select, input, textarea { font-size:16px !important; } button { min-height:38px; } }
+
+/* Scrollbar */
+::-webkit-scrollbar { height:4px; width:6px; }
+::-webkit-scrollbar-track { background:transparent; }
+::-webkit-scrollbar-thumb { background:#cbd5e0; border-radius:4px; }
+
+/* Print */
+@media print { .erp-nav, .erp-tabs, button, .erp-login-toggle { display:none !important; } }
