@@ -1293,7 +1293,7 @@ export default function AdminDashboard({ admin, onLogout }) {
 
   return (
     <div style={styles.container}>
-      <nav style={styles.nav}>
+      <nav style={styles.nav} className="erp-nav">
         <h2 style={styles.navTitle}>🎓 College ERP — Admin Panel</h2>
         <div style={styles.navRight}>
           <span style={styles.adminName}>👤 {admin.name}</span>
@@ -1301,7 +1301,7 @@ export default function AdminDashboard({ admin, onLogout }) {
         </div>
       </nav>
 
-      <div style={styles.tabs}>
+      <div style={styles.tabs} className="erp-tabs">
         {tabs.map(tab => (
           <button key={tab} style={{...styles.tab, ...(activeTab===tab ? styles.activeTab : {})}}
             onClick={() => { setActiveTab(tab); setMsg(''); setForm({}); setStudentLevel(''); setStudentFaculty(''); }}>
@@ -1312,7 +1312,7 @@ export default function AdminDashboard({ admin, onLogout }) {
 
       {msg && <div style={msgStyle}>{msg}</div>}
 
-      <div style={styles.content}>
+      <div style={styles.content} className="erp-content">
 
         {/* LEVELS FACULTIES PROGRAMMES */}
         {activeTab === 'levels' && (
@@ -1320,12 +1320,12 @@ export default function AdminDashboard({ admin, onLogout }) {
             {/* LEVELS */}
             <div style={styles.section}>
               <h3 style={styles.sectionTitle}>🎯 Levels</h3>
-              <form onSubmit={handleAddLevel} style={styles.form}>
+              <form onSubmit={handleAddLevel} style={styles.form} className="erp-form-grid erp-form-grid-3">
                 <input style={styles.input} placeholder="Level (e.g. UG)" value={form.level_name||''} onChange={e=>setForm({...form,level_name:e.target.value})} required />
                 <input style={styles.input} placeholder="Description" value={form.description||''} onChange={e=>setForm({...form,description:e.target.value})} />
                 <button style={styles.addBtn} type="submit">Add</button>
               </form>
-              <table style={styles.table}>
+              <table style={styles.table} className="erp-table">
                 <thead><tr>{['ID','Level','Desc','Del'].map(h=><th key={h} style={styles.th}>{h}</th>)}</tr></thead>
                 <tbody>{levels.map(l=>(
                   <tr key={l.level_id}>
@@ -1341,12 +1341,12 @@ export default function AdminDashboard({ admin, onLogout }) {
             {/* FACULTIES */}
             <div style={styles.section}>
               <h3 style={styles.sectionTitle}>🏛️ Faculties</h3>
-              <form onSubmit={handleAddFaculty} style={styles.form}>
+              <form onSubmit={handleAddFaculty} style={styles.form} className="erp-form-grid erp-form-grid-3">
                 <input style={styles.input} placeholder="Faculty (e.g. Arts)" value={form.faculty_name||''} onChange={e=>setForm({...form,faculty_name:e.target.value})} required />
                 <input style={styles.input} placeholder="Description" value={form.description||''} onChange={e=>setForm({...form,description:e.target.value})} />
                 <button style={styles.addBtn} type="submit">Add</button>
               </form>
-              <table style={styles.table}>
+              <table style={styles.table} className="erp-table">
                 <thead><tr>{['ID','Faculty','Desc','Del'].map(h=><th key={h} style={styles.th}>{h}</th>)}</tr></thead>
                 <tbody>{faculties.map(f=>(
                   <tr key={f.faculty_id}>
@@ -1362,7 +1362,7 @@ export default function AdminDashboard({ admin, onLogout }) {
             {/* PROGRAMMES */}
             <div style={styles.section}>
               <h3 style={styles.sectionTitle}>📚 Programmes</h3>
-              <form onSubmit={handleAddProgramme} style={styles.form}>
+              <form onSubmit={handleAddProgramme} style={styles.form} className="erp-form-grid erp-form-grid-4">
                 <select style={styles.input} value={form.level_id||''} onChange={e=>setForm({...form,level_id:e.target.value})} required>
                   <option value="">Select Level</option>
                   {levels.map(l=><option key={l.level_id} value={l.level_id}>{l.level_name}</option>)}
@@ -1375,7 +1375,7 @@ export default function AdminDashboard({ admin, onLogout }) {
                 <input style={styles.input} type="number" placeholder="Duration (yrs)" value={form.duration_years||''} onChange={e=>setForm({...form,duration_years:e.target.value})} required />
                 <button style={styles.addBtn} type="submit">Add</button>
               </form>
-              <table style={styles.table}>
+              <table style={styles.table} className="erp-table">
                 <thead><tr>{['Level','Faculty','Programme','Dur','Del'].map(h=><th key={h} style={styles.th}>{h}</th>)}</tr></thead>
                 <tbody>{programmes.map(p=>(
                   <tr key={p.programme_id}>
@@ -1414,7 +1414,7 @@ export default function AdminDashboard({ admin, onLogout }) {
               <p style={styles.importHint}>📋 Required: <strong>roll_no, name, email, phone, level_name, faculty_name, programme_name, semester, year, password</strong></p>
             </div>
             <h3>Add Student Manually</h3>
-            <form onSubmit={handleAddStudent} style={styles.form}>
+            <form onSubmit={handleAddStudent} style={styles.form} className="erp-form-grid erp-form-grid-4">
               {['roll_no','name','email','phone'].map(f=>(
                 <input key={f} style={styles.input} placeholder={f.replace('_',' ')} value={form[f]||''} onChange={e=>setForm({...form,[f]:e.target.value})} required />
               ))}
@@ -1436,7 +1436,7 @@ export default function AdminDashboard({ admin, onLogout }) {
               <button style={styles.addBtn} type="submit">Add Student</button>
             </form>
             <h3>All Students ({students.length})</h3>
-            <table style={styles.table}>
+            <table style={styles.table} className="erp-table">
               <thead><tr>{['ID','Roll No','Name','Level','Faculty','Programme','Sem','Action'].map(h=><th key={h} style={styles.th}>{h}</th>)}</tr></thead>
               <tbody>{students.map(s=>(
                 <tr key={s.student_id}>
@@ -1469,7 +1469,7 @@ export default function AdminDashboard({ admin, onLogout }) {
               <p style={styles.importHint}>📋 Required: <strong>first_name, email, password</strong> &nbsp;|&nbsp; Optional: title, last_name, phone, designation, employee_code, discipline_1, discipline_2, discipline_3, department_1, department_2</p>
             </div>
             <h3>Add Teacher Manually</h3>
-            <form onSubmit={handleAddTeacher} style={styles.form}>
+            <form onSubmit={handleAddTeacher} style={styles.form} className="erp-form-grid erp-form-grid-4">
               <select style={styles.input} value={form.title||''} onChange={e=>setForm({...form,title:e.target.value})} required>
                 <option value="">Select Title</option>
                 {['Dr','Mr','Mrs','Ms','Prof'].map(t=><option key={t} value={t}>{t}</option>)}
@@ -1544,7 +1544,7 @@ export default function AdminDashboard({ admin, onLogout }) {
                 <button style={{...styles.delBtn, padding:'0.6rem 1rem'}} type="button" onClick={()=>setEditingTeacher(null)}>Cancel</button>
               </form>
             )}
-            <table style={styles.table}>
+            <table style={styles.table} className="erp-table">
               <thead><tr>{['ID','Name','Email','Phone','Department','Discipline','Action'].map(h=><th key={h} style={styles.th}>{h}</th>)}</tr></thead>
               <tbody>{teachers.map(t=>(
                 <tr key={t.teacher_id} style={editingTeacher?.teacher_id===t.teacher_id?{background:'#fffbeb'}:{}}>
@@ -2007,7 +2007,7 @@ export default function AdminDashboard({ admin, onLogout }) {
               </div>
             </div>
             <h3>All Attendance Records ({attendance.length})</h3>
-            <table style={styles.table}>
+            <table style={styles.table} className="erp-table">
               <thead><tr>{['ID','Student','Subject','Date','Status'].map(h=><th key={h} style={styles.th}>{h}</th>)}</tr></thead>
               <tbody>{attendance.map(a=>(
                 <tr key={a.attendance_id}>
@@ -2198,7 +2198,7 @@ export default function AdminDashboard({ admin, onLogout }) {
               </div>
             </div>
             <h3>All Marks Records ({marks.length})</h3>
-            <table style={styles.table}>
+            <table style={styles.table} className="erp-table">
               <thead><tr>{['ID','Student','Subject','Exam Type','Marks','Max','Percentage','Semester'].map(h=><th key={h} style={styles.th}>{h}</th>)}</tr></thead>
               <tbody>{marks.map(m=>(
                 <tr key={m.mark_id}>

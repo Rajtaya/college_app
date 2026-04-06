@@ -68,7 +68,7 @@ export default function ClerkDashboard({ clerk, onLogout }) {
   const renderTable = (data, columns) => {
     const filtered = filterData(data);
     return (
-      <div style={{overflowX:'auto'}}>
+      <div style={{overflowX:'auto'}} className="erp-table-wrap">
         <table style={st.table}>
           <thead><tr>{columns.map(c => <th key={c.key} style={st.th}>{c.label}</th>)}</tr></thead>
           <tbody>{filtered.length === 0
@@ -99,7 +99,7 @@ export default function ClerkDashboard({ clerk, onLogout }) {
       {popup && <div style={{...st.popup, background: popup.type==='error'?'#fed7d7':'#c6f6d5', color: popup.type==='error'?'#c53030':'#276749'}}>{popup.text}</div>}
 
       {/* Header */}
-      <div style={{...st.header, background:`linear-gradient(135deg, ${accentColor}, ${accentColor}dd)`}}>
+      <div style={{...st.header, background:`linear-gradient(135deg, ${accentColor}, ${accentColor}dd)`}} className="erp-gradient-header">
         <div>
           <h1 style={st.headerTitle}>📋 {facultyName} Faculty — Clerk Portal</h1>
           <p style={st.headerSub}>{clerk.first_name} {clerk.last_name} · Read-Only Access</p>
@@ -108,7 +108,7 @@ export default function ClerkDashboard({ clerk, onLogout }) {
       </div>
 
       {/* Tabs */}
-      <div style={st.tabs}>
+      <div style={st.tabs} className="erp-tabs">
         {tabs.map(t => (
           <button key={t.id}
             style={{...st.tab, ...(activeTab===t.id ? {...st.activeTab, borderBottomColor:accentColor, color:accentColor} : {})}}
@@ -116,11 +116,11 @@ export default function ClerkDashboard({ clerk, onLogout }) {
         ))}
       </div>
 
-      <div style={st.content}>
+      <div style={st.content} className="erp-content">
         {/* OVERVIEW */}
         {activeTab === 'overview' && (
           <div>
-            <div style={st.statsGrid}>
+            <div style={st.statsGrid} className="erp-stats-grid">
               {[
                 { label:'Students', value:stats.totalStudents||0, icon:'👨‍🎓', color:'#4c51bf' },
                 { label:'Teachers', value:stats.totalTeachers||0, icon:'👨‍🏫', color:'#2b6cb0' },
@@ -135,7 +135,7 @@ export default function ClerkDashboard({ clerk, onLogout }) {
                 </div>
               ))}
             </div>
-            <div style={st.card}>
+            <div style={st.card} className="erp-card">
               <h3 style={st.cardTitle}>ℹ️ About This Portal</h3>
               <p style={{color:'#4a5568',lineHeight:'1.6'}}>
                 This is a <strong>read-only</strong> portal for the {facultyName} faculty clerk.
@@ -148,8 +148,8 @@ export default function ClerkDashboard({ clerk, onLogout }) {
 
         {/* STUDENTS */}
         {activeTab === 'students' && (
-          <div style={st.card}>
-            <div style={st.cardHeader}>
+          <div style={st.card} className="erp-card">
+            <div style={st.cardHeader} className="erp-card-header">
               <h3 style={st.cardTitle}>👨‍🎓 Students — {facultyName} Faculty</h3>
               <div style={{display:'flex',gap:'8px',alignItems:'center'}}>
                 <input style={st.search} placeholder="🔍 Search..." value={search} onChange={e=>setSearch(e.target.value)} />
@@ -170,8 +170,8 @@ export default function ClerkDashboard({ clerk, onLogout }) {
 
         {/* ATTENDANCE */}
         {activeTab === 'attendance' && (
-          <div style={st.card}>
-            <div style={st.cardHeader}>
+          <div style={st.card} className="erp-card">
+            <div style={st.cardHeader} className="erp-card-header">
               <h3 style={st.cardTitle}>📅 Attendance Summary — {facultyName} Faculty</h3>
               <div style={{display:'flex',gap:'8px',alignItems:'center'}}>
                 <input style={st.search} placeholder="🔍 Search..." value={search} onChange={e=>setSearch(e.target.value)} />
@@ -196,8 +196,8 @@ export default function ClerkDashboard({ clerk, onLogout }) {
 
         {/* MARKS */}
         {activeTab === 'marks' && (
-          <div style={st.card}>
-            <div style={st.cardHeader}>
+          <div style={st.card} className="erp-card">
+            <div style={st.cardHeader} className="erp-card-header">
               <h3 style={st.cardTitle}>📝 Marks — {facultyName} Faculty</h3>
               <div style={{display:'flex',gap:'8px',alignItems:'center'}}>
                 <input style={st.search} placeholder="🔍 Search..." value={search} onChange={e=>setSearch(e.target.value)} />
@@ -224,8 +224,8 @@ export default function ClerkDashboard({ clerk, onLogout }) {
 
         {/* ENROLLMENT */}
         {activeTab === 'enrollment' && (
-          <div style={st.card}>
-            <div style={st.cardHeader}>
+          <div style={st.card} className="erp-card">
+            <div style={st.cardHeader} className="erp-card-header">
               <h3 style={st.cardTitle}>📚 Enrollment — {facultyName} Faculty</h3>
               <div style={{display:'flex',gap:'8px',alignItems:'center'}}>
                 <input style={st.search} placeholder="🔍 Search..." value={search} onChange={e=>setSearch(e.target.value)} />

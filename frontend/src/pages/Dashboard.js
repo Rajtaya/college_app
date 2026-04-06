@@ -202,7 +202,7 @@ export default function Dashboard({ student, onLogout, onStudentUpdate }) {
         </div>
       )}
       <style>{'@keyframes popupFade { from { opacity:0; transform:scale(0.85); } to { opacity:1; transform:scale(1); } }'}</style>
-      <nav style={styles.nav}>
+      <nav style={styles.nav} className="erp-nav">
         <h2 style={styles.navTitle}>🎓 College ERP</h2>
         <div style={styles.navRight}>
           <span style={styles.studentName}>👤 {student.name}</span>
@@ -210,7 +210,7 @@ export default function Dashboard({ student, onLogout, onStudentUpdate }) {
         </div>
       </nav>
 
-      <div style={styles.tabs}>
+      <div style={styles.tabs} className="erp-tabs">
         {/* Profile completion banner */}
         {isProfileIncomplete && (
           <div style={{background:'#fffbeb',border:'2px solid #f6e05e',borderRadius:'10px',padding:'0.85rem 1.25rem',marginBottom:'1rem',display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:'0.5rem'}}>
@@ -233,7 +233,7 @@ export default function Dashboard({ student, onLogout, onStudentUpdate }) {
         ))}
       </div>
 
-      <div style={styles.content}>
+      <div style={styles.content} className="erp-content">
 
         {activeTab === 'overview' && (
           <div>

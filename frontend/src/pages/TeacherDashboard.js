@@ -95,7 +95,7 @@ export default function TeacherDashboard({ teacher, onLogout }) {
       const existing = await API.get(`/attendance/subject/${attSubject}/date/${attDate}`).catch(() => ({ data: [] }));
       const existingMap = {};
       existing.data.forEach(a => { existingMap[a.student_id] = a.status; });
-      setAttStudents(r.data.map(s => ({ ...s, status: existingMap[s.student_id] || 'PRESENT' })));
+      setAttStudents(r.data.map(s => ({ ...s, status: existingMap[s.student_id] || 'ABSENT' })));
     } catch(e) { showMsg('Failed to load students', 'error'); }
     setAttLoading(false);
   };

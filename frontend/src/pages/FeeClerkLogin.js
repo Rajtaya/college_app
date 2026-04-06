@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import API from '../api';
 
-export default function ClerkLogin({ onLogin }) {
+export default function FeeClerkLogin({ onLogin }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -10,11 +10,11 @@ export default function ClerkLogin({ onLogin }) {
   const handleSubmit = async (e) => {
     e.preventDefault(); setError(''); setLoading(true);
     try {
-      const res = await API.post('/clerks/login', { email, password });
+      const res = await API.post('/fee-clerks/login', { email, password });
       localStorage.setItem('token', res.data.token);
-      localStorage.setItem('role', 'clerk');
-      localStorage.setItem('clerk', JSON.stringify(res.data.clerk));
-      onLogin(res.data.clerk, 'clerk');
+      localStorage.setItem('role', 'fee_clerk');
+      localStorage.setItem('feeClerk', JSON.stringify(res.data.feeClerk));
+      onLogin(res.data.feeClerk, 'fee_clerk');
     } catch (err) {
       setError(err.response?.data?.error || 'Login failed');
     } finally { setLoading(false); }
@@ -23,16 +23,14 @@ export default function ClerkLogin({ onLogin }) {
   return (
     <div style={styles.container} className="erp-login-container">
       <form onSubmit={handleSubmit} style={styles.form} className="erp-login-form">
-        <div style={styles.iconWrap}>
-          <span style={styles.icon}>📋</span>
-        </div>
-        <h2 style={styles.title}>Clerk Login</h2>
-        <p style={styles.subtitle}>Faculty Office Portal</p>
+        <div style={styles.iconWrap}><span style={styles.icon}>💰</span></div>
+        <h2 style={styles.title}>Fee Clerk Login</h2>
+        <p style={styles.subtitle}>Fee Management Portal</p>
         {error && <div style={styles.error}>{error}</div>}
         <div style={styles.field}>
           <label style={styles.label}>Email</label>
           <input type="email" value={email} onChange={e => setEmail(e.target.value)}
-            placeholder="clerk.arts@college.com" style={styles.input} required />
+            placeholder="fee.clerk@college.com" style={styles.input} required />
         </div>
         <div style={styles.field}>
           <label style={styles.label}>Password</label>
@@ -49,7 +47,7 @@ export default function ClerkLogin({ onLogin }) {
 
 const styles = {
   container: { minHeight:'100vh', display:'flex', alignItems:'center', justifyContent:'center',
-    background:'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' },
+    background:'linear-gradient(135deg, #d69e2e 0%, #b7791f 50%, #975a16 100%)' },
   form: { background:'#fff', padding:'2.5rem', borderRadius:'16px', width:'380px',
     boxShadow:'0 20px 60px rgba(0,0,0,0.15)' },
   iconWrap: { textAlign:'center', marginBottom:'0.5rem' },
@@ -61,9 +59,8 @@ const styles = {
   field: { marginBottom:'1rem' },
   label: { display:'block', marginBottom:'0.35rem', fontWeight:'600', color:'#4a5568', fontSize:'0.85rem' },
   input: { width:'100%', padding:'0.7rem', border:'1.5px solid #e2e8f0', borderRadius:'8px',
-    fontSize:'0.95rem', outline:'none', boxSizing:'border-box', transition:'border 0.2s',
-    ':focus': { borderColor:'#667eea' } },
-  btn: { width:'100%', padding:'0.8rem', background:'linear-gradient(135deg, #667eea, #764ba2)',
+    fontSize:'0.95rem', outline:'none', boxSizing:'border-box' },
+  btn: { width:'100%', padding:'0.8rem', background:'linear-gradient(135deg, #d69e2e, #975a16)',
     color:'#fff', border:'none', borderRadius:'8px', fontSize:'1rem', fontWeight:'600',
     cursor:'pointer', marginTop:'0.5rem' },
 };

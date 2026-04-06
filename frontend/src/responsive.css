@@ -86,3 +86,53 @@
 
 /* Print */
 @media print { .erp-nav, .erp-tabs, button, .erp-login-toggle { display:none !important; } }
+
+/* ADMIN TABLES — direct overflow */
+.erp-table { display:block; overflow-x:auto; -webkit-overflow-scrolling:touch; }
+@media (max-width:768px) {
+  .erp-table { font-size:0.8rem; }
+  .erp-table th, .erp-table td { padding:0.4rem 0.5rem !important; white-space:nowrap; }
+}
+
+/* FORM GRID overrides for admin forms */
+@media (max-width:768px) {
+  .erp-form-grid-3, .erp-form-grid-4 { display:flex !important; flex-direction:column !important; }
+  .erp-form-grid-3 input, .erp-form-grid-3 select,
+  .erp-form-grid-4 input, .erp-form-grid-4 select { width:100% !important; box-sizing:border-box; }
+}
+
+/* Student Dashboard stat cards */
+@media (max-width:600px) {
+  .erp-content > div[style*="grid"] { grid-template-columns:repeat(2,1fr) !important; }
+}
+
+/* Fee Clerk search row */
+@media (max-width:600px) {
+  .erp-card > div[style*="flex"] { flex-direction:column !important; }
+  .erp-card input[style*="flex"], .erp-card select { width:100% !important; }
+}
+
+/* ADMIN TABLES — direct overflow */
+.erp-table { display:block; overflow-x:auto; -webkit-overflow-scrolling:touch; }
+@media (max-width:768px) {
+  .erp-table { font-size:0.8rem; }
+  .erp-table th, .erp-table td { padding:0.4rem 0.5rem !important; white-space:nowrap; }
+}
+
+/* FORM GRID overrides for admin forms */
+@media (max-width:768px) {
+  .erp-form-grid-3, .erp-form-grid-4 { display:flex !important; flex-direction:column !important; }
+  .erp-form-grid-3 input, .erp-form-grid-3 select,
+  .erp-form-grid-4 input, .erp-form-grid-4 select { width:100% !important; box-sizing:border-box; }
+}
+
+/* Student Dashboard stat cards */
+@media (max-width:600px) {
+  .erp-content > div[style*="grid"] { grid-template-columns:repeat(2,1fr) !important; }
+}
+
+/* Fee Clerk search row */
+@media (max-width:600px) {
+  .erp-card > div[style*="flex"] { flex-direction:column !important; }
+  .erp-card input[style*="flex"], .erp-card select { width:100% !important; }
+}

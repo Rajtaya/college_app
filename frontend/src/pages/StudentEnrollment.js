@@ -459,7 +459,7 @@ export default function StudentEnrollment({ student, onBack }) {
   if (loading) return <div style={s.loading}>⏳ Loading your subjects...</div>;
 
   return (
-    <div style={s.container}>
+    <div style={s.container} className="erp-content">
       {popup && (
         <div style={{position:'fixed',top:0,left:0,width:'100%',height:'100%',display:'flex',alignItems:'center',justifyContent:'center',zIndex:9999,pointerEvents:'none'}}>
           <div style={{background:popup.type==='error'?'#e53e3e':popup.type==='warning'?'#ed8936':'#38a169',color:'#fff',padding:'1.25rem 2rem',borderRadius:'14px',boxShadow:'0 8px 32px rgba(0,0,0,0.25)',fontSize:'1rem',fontWeight:'700',maxWidth:'420px',textAlign:'center',animation:'popupFade 0.3s ease'}}>

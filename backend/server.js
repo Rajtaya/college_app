@@ -81,6 +81,7 @@ app.use('/api/disciplines', require('./routes/disciplines'));
 app.use('/api/departments', require('./routes/departments'));
 app.use('/api/notifications', require('./routes/notifications'));
 app.use("/api/clerks",      require("./routes/clerks"));
+app.use("/api/fee-clerks",  require("./routes/fee-clerks"));
 
 // Serve uploaded files (notifications attachments)
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
