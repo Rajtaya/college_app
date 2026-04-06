@@ -665,8 +665,8 @@ router.post('/bulk-import', verify('admin'), async (req, res) => {
       try {
         await db.query(
           `INSERT INTO student_subject_enrollment (student_id, subject_id, semester, academic_year_id, status, is_draft)
-           VALUES (?, ?, ?, ?, 'ACCEPTED', 0)
-           ON DUPLICATE KEY UPDATE status = 'ACCEPTED', is_draft = 0`,
+           VALUES (?, ?, ?, ?, 'DRAFT', 1)
+           ON DUPLICATE KEY UPDATE status = 'DRAFT', is_draft = 1`,
           [student.student_id, subject_id, student.semester, academic_year_id]
         );
         success++;

@@ -37,6 +37,15 @@ export default function AdminDashboard({ admin, onLogout }) {
   const [assignmentData, setAssignmentData] = useState([]);
   const [editingAssignment, setEditingAssignment] = useState(null);
   const [importing, setImporting] = useState(false);
+  const [stuFilterProg, setStuFilterProg] = useState('');
+  const [stuFilterSem, setStuFilterSem] = useState('');
+  const [stuFilterFaculty, setStuFilterFaculty] = useState('');
+  const [stuSearch, setStuSearch] = useState('');
+  const [enrollFilterProg, setEnrollFilterProg] = useState('');
+  const [enrollFilterFaculty, setEnrollFilterFaculty] = useState('');
+  const [enrollFilterSem, setEnrollFilterSem] = useState('');
+  const [enrollFilterLevel, setEnrollFilterLevel] = useState('');
+  const [enrollFilterStatus, setEnrollFilterStatus] = useState('');
   const studentFileRef = useRef();
   const teacherFileRef = useRef();
   const feeFileRef = useRef();
@@ -1436,9 +1445,33 @@ export default function AdminDashboard({ admin, onLogout }) {
               <button style={styles.addBtn} type="submit">Add Student</button>
             </form>
             <h3>All Students ({students.length})</h3>
+            <div style={{display:'flex',gap:'8px',flexWrap:'wrap',marginBottom:'1rem',alignItems:'center'}}>
+              <input style={{...styles.input,flex:'1 1 180px',minWidth:'150px'}} placeholder="🔍 Search roll no or name..." value={stuSearch} onChange={e=>setStuSearch(e.target.value)} />
+              <select style={{...styles.input,flex:'0 1 150px'}} value={stuFilterFaculty} onChange={e=>{setStuFilterFaculty(e.target.value);setStuFilterProg('');}}>
+                <option value="">All Faculties</option>
+                {faculties.map(f=><option key={f.faculty_id} value={f.faculty_id}>{f.faculty_name}</option>)}
+              </select>
+              <select style={{...styles.input,flex:'0 1 180px'}} value={stuFilterProg} onChange={e=>setStuFilterProg(e.target.value)}>
+                <option value="">All Programmes</option>
+                {programmes.filter(p=>!stuFilterFaculty||String(p.faculty_id)===stuFilterFaculty).map(p=><option key={p.programme_id} value={p.programme_id}>{p.programme_name}</option>)}
+              </select>
+              <select style={{...styles.input,flex:'0 1 100px'}} value={stuFilterSem} onChange={e=>setStuFilterSem(e.target.value)}>
+                <option value="">All Sem</option>
+                {[1,2,3,4,5,6,7,8].map(s=><option key={s} value={s}>Sem {s}</option>)}
+              </select>
+              <button style={{...styles.delBtn,background:'#a0aec0',color:'#fff'}} onClick={()=>{setStuSearch('');setStuFilterFaculty('');setStuFilterProg('');setStuFilterSem('');}}>Clear</button>
+            </div>
+            {(() => {
+              let filtered = students;
+              if (stuSearch) { const q = stuSearch.toLowerCase(); filtered = filtered.filter(s => (s.roll_no||'').toLowerCase().includes(q) || (s.name||'').toLowerCase().includes(q)); }
+              if (stuFilterFaculty) filtered = filtered.filter(s => String(s.faculty_id) === stuFilterFaculty);
+              if (stuFilterProg) filtered = filtered.filter(s => String(s.programme_id) === stuFilterProg);
+              if (stuFilterSem) filtered = filtered.filter(s => String(s.semester) === stuFilterSem);
+              return (<>
+              <p style={{margin:'0 0 0.5rem',color:'#718096',fontSize:'0.85rem'}}>Showing {filtered.length} of {students.length} students</p>
             <table style={styles.table} className="erp-table">
               <thead><tr>{['ID','Roll No','Name','Level','Faculty','Programme','Sem','Action'].map(h=><th key={h} style={styles.th}>{h}</th>)}</tr></thead>
-              <tbody>{students.map(s=>(
+              <tbody>{filtered.map(s=>(
                 <tr key={s.student_id}>
                   <td style={styles.td}>{s.student_id}</td>
                   <td style={styles.td}>{s.roll_no}</td>
@@ -1451,6 +1484,7 @@ export default function AdminDashboard({ admin, onLogout }) {
                 </tr>
               ))}</tbody>
             </table>
+            </>); })()}
           </div>
         )}
 
@@ -1766,18 +1800,45 @@ export default function AdminDashboard({ admin, onLogout }) {
                     <h3 style={{margin:0}}>📋 Enrollment Management
                       <span style={{fontSize:'0.85rem',color:'#718096',fontWeight:'400',marginLeft:'0.75rem'}}>({enrollmentSummary.length} students)</span>
                     </h3>
-                    <div style={{display:'flex',gap:'0.5rem',flexWrap:'wrap',alignItems:'center'}}>
-                      <input style={{...styles.input,minWidth:'200px',margin:0}} placeholder="🔍 Search by name or roll no…"
-                        value={enrollSearch} onChange={e=>setEnrollSearch(e.target.value)} />
-                      <button style={{...styles.templateBtn,whiteSpace:'nowrap'}} onClick={exportEnrollmentSummary}>📊 Summary</button>
-                      <button style={{...styles.templateBtn,whiteSpace:'nowrap',background:'#276749',color:'#fff'}} onClick={handleExportEnrollment}>📥 Programme-wise</button>
-                      <button style={{...styles.templateBtn,whiteSpace:'nowrap'}} onClick={handleExportSemesterWise}>📅 Semester-wise</button>
-                      <button style={{...styles.templateBtn,whiteSpace:'nowrap'}} onClick={handleExportOddSemesters}>📋 Odd Sem (1,3,5,7)</button>
-                      <button style={{...styles.templateBtn,whiteSpace:'nowrap'}} onClick={handleExportEvenSemesters}>📋 Even Sem (2,4,6,8)</button>
-                      <button style={{...styles.templateBtn,whiteSpace:'nowrap'}} onClick={exportEnrollmentDetail}>📄 Full Detail</button>
-                      <button style={{...styles.templateBtn,whiteSpace:'nowrap'}} onClick={exportSubjectWise}>📚 Subject-wise</button>
-                      <label style={{...styles.templateBtn,whiteSpace:'nowrap',background:'#2b6cb0',color:'#fff',cursor:'pointer',margin:0}}>📤 Import Enrollment <input type="file" accept=".xlsx,.xls" hidden onChange={handleImportEnrollment}/></label>
-                    </div>
+                    <label style={{...styles.templateBtn,whiteSpace:'nowrap',background:'#2b6cb0',color:'#fff',cursor:'pointer',margin:0}}>📤 Import Enrollment <input type="file" accept=".xlsx,.xls" hidden onChange={handleImportEnrollment}/></label>
+                  </div>
+                  {/* Filters */}
+                  <div style={{display:'flex',gap:'8px',flexWrap:'wrap',marginBottom:'1rem',alignItems:'center'}}>
+                    <input style={{...styles.input,flex:'1 1 180px',minWidth:'150px',margin:0}} placeholder="🔍 Search roll no or name…"
+                      value={enrollSearch} onChange={e=>setEnrollSearch(e.target.value)} />
+                    <select style={{...styles.input,flex:'0 1 140px',margin:0}} value={enrollFilterFaculty} onChange={e=>{setEnrollFilterFaculty(e.target.value);setEnrollFilterProg('');}}>
+                      <option value="">All Faculties</option>
+                      {faculties.map(f=><option key={f.faculty_id} value={f.faculty_id}>{f.faculty_name}</option>)}
+                    </select>
+                    <select style={{...styles.input,flex:'0 1 120px',margin:0}} value={enrollFilterLevel} onChange={e=>{setEnrollFilterLevel(e.target.value);setEnrollFilterProg('');}}>
+                      <option value="">All Levels</option>
+                      {levels.map(l=><option key={l.level_id} value={l.level_id}>{l.level_name}</option>)}
+                    </select>
+                    <select style={{...styles.input,flex:'0 1 180px',margin:0}} value={enrollFilterProg} onChange={e=>setEnrollFilterProg(e.target.value)}>
+                      <option value="">All Programmes</option>
+                      {programmes.filter(p=>(!enrollFilterFaculty||String(p.faculty_id)===enrollFilterFaculty)&&(!enrollFilterLevel||String(p.level_id)===enrollFilterLevel)).map(p=><option key={p.programme_id} value={p.programme_id}>{p.programme_name}</option>)}
+                    </select>
+                    <select style={{...styles.input,flex:'0 1 100px',margin:0}} value={enrollFilterSem} onChange={e=>setEnrollFilterSem(e.target.value)}>
+                      <option value="">All Sem</option>
+                      {[1,2,3,4,5,6,7,8].map(s=><option key={s} value={s}>Sem {s}</option>)}
+                    </select>
+                    <select style={{...styles.input,flex:'0 1 140px',margin:0}} value={enrollFilterStatus} onChange={e=>setEnrollFilterStatus(e.target.value)}>
+                      <option value="">All Status</option>
+                      <option value="submitted">Submitted</option>
+                      <option value="draft">Draft</option>
+                      <option value="not_enrolled">Not Enrolled</option>
+                    </select>
+                    <button style={{...styles.delBtn,background:'#a0aec0',color:'#fff'}} onClick={()=>{setEnrollSearch('');setEnrollFilterFaculty('');setEnrollFilterLevel('');setEnrollFilterProg('');setEnrollFilterSem('');setEnrollFilterStatus('');}}>Clear</button>
+                  </div>
+                  {/* Export Buttons */}
+                  <div style={{display:'flex',gap:'0.5rem',flexWrap:'wrap',marginBottom:'1rem'}}>
+                    <button style={{...styles.templateBtn,whiteSpace:'nowrap'}} onClick={exportEnrollmentSummary}>📊 Summary</button>
+                    <button style={{...styles.templateBtn,whiteSpace:'nowrap',background:'#276749',color:'#fff'}} onClick={handleExportEnrollment}>📥 Programme-wise</button>
+                    <button style={{...styles.templateBtn,whiteSpace:'nowrap'}} onClick={handleExportSemesterWise}>📅 Semester-wise</button>
+                    <button style={{...styles.templateBtn,whiteSpace:'nowrap'}} onClick={handleExportOddSemesters}>📋 Odd Sem</button>
+                    <button style={{...styles.templateBtn,whiteSpace:'nowrap'}} onClick={handleExportEvenSemesters}>📋 Even Sem</button>
+                    <button style={{...styles.templateBtn,whiteSpace:'nowrap'}} onClick={exportEnrollmentDetail}>📄 Full Detail</button>
+                    <button style={{...styles.templateBtn,whiteSpace:'nowrap'}} onClick={exportSubjectWise}>📚 Subject-wise</button>
                   </div>
                   {/* Stats bar */}
                   <div style={{display:'flex',gap:'1rem',flexWrap:'wrap'}}>
@@ -1799,7 +1860,17 @@ export default function AdminDashboard({ admin, onLogout }) {
                   <table style={{...styles.table,boxShadow:'none'}}>
                     <thead><tr>{['Roll No','Name','Programme','Level','Sem','Status','Accepted','Pending','Admin Modified','Actions'].map(h=><th key={h} style={styles.th}>{h}</th>)}</tr></thead>
                     <tbody>{enrollmentSummary
-                      .filter(s => !enrollSearch || s.student_name?.toLowerCase().includes(enrollSearch.toLowerCase()) || s.roll_no?.toLowerCase().includes(enrollSearch.toLowerCase()))
+                      .filter(s => {
+                        if (enrollSearch) { const q = enrollSearch.toLowerCase(); if (!(s.student_name||'').toLowerCase().includes(q) && !(s.roll_no||'').toLowerCase().includes(q)) return false; }
+                        if (enrollFilterFaculty && String(s.faculty_id) !== enrollFilterFaculty) return false;
+                        if (enrollFilterLevel && String(s.level_id) !== enrollFilterLevel) return false;
+                        if (enrollFilterProg && String(s.programme_id) !== enrollFilterProg) return false;
+                        if (enrollFilterSem && String(s.semester) !== enrollFilterSem) return false;
+                        if (enrollFilterStatus === 'submitted' && !(s.accepted > 0)) return false;
+                        if (enrollFilterStatus === 'draft' && !(s.total_enrolled > 0 && s.accepted === 0)) return false;
+                        if (enrollFilterStatus === 'not_enrolled' && s.total_enrolled) return false;
+                        return true;
+                      })
                       .map(s => {
                         const isSubmitted = s.accepted > 0;
                         const notEnrolled = !s.total_enrolled;

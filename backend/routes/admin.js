@@ -522,6 +522,7 @@ router.get('/enrollment/summary', async (req, res) => {
   try {
     const [rows] = await db.query(
       `SELECT st.student_id, st.roll_no, CONCAT(st.first_name, ' ', st.last_name) AS student_name,
+              st.programme_id, st.level_id, st.faculty_id,
               p.programme_name, l.level_name, st.semester,
               COUNT(e.enrollment_id) as total_enrolled,
               SUM(CASE WHEN e.status='ACCEPTED' THEN 1 ELSE 0 END) as accepted,
