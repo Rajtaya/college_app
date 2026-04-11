@@ -212,12 +212,53 @@ export default function AdminDashboard({ admin, onLogout }) {
     return rows;
   };
 
-  // Export: Programme-wise (one sheet per programme)
+  // ── Enrollment Export: shared cache + filter helper ────────────────
+  const enrollmentExportCacheRef = useRef({ data: null, ts: 0 });
+
+  const fetchEnrollmentExportData = async () => {
+    const CACHE_MS = 60 * 1000;
+    const cache = enrollmentExportCacheRef.current;
+    if (cache.data && Date.now() - cache.ts < CACHE_MS) return cache.data;
+    const r = await API.get('/admin/enrollment/export');
+    enrollmentExportCacheRef.current = { data: r.data, ts: Date.now() };
+    return r.data;
+  };
+
+  // Apply the on-screen Enrollment Management filters to export rows.
+  const applyEnrollmentFilters = (data) => {
+    const search = (enrollSearch || '').trim().toLowerCase();
+    return data.filter(r => {
+      if (search) {
+        const hay = `${r.roll_no || ''} ${r.student_name || ''}`.toLowerCase();
+        if (!hay.includes(search)) return false;
+      }
+      if (enrollFilterFaculty && String(r.faculty_id)   !== String(enrollFilterFaculty)) return false;
+      if (enrollFilterLevel   && String(r.level_id)     !== String(enrollFilterLevel))   return false;
+      if (enrollFilterProg    && String(r.programme_id) !== String(enrollFilterProg))    return false;
+      if (enrollFilterSem     && String(r.semester)     !== String(enrollFilterSem))     return false;
+      // Status filter: dropdown values are 'submitted','draft','not_enrolled'
+      // Export endpoint only returns ACCEPTED (Submitted) rows, so:
+      //   submitted    → all rows pass (already all ACCEPTED)
+      //   draft        → no match (drafts not in export)
+      //   not_enrolled → no match (not-enrolled students not in export)
+      if (enrollFilterStatus === 'draft' || enrollFilterStatus === 'not_enrolled') return false;
+      return true;
+    });
+  };
+
+  const todayStamp = () => new Date().toLocaleDateString('en-IN').replace(/\//g, '-');
+
+  const logExportError = (label, e) => {
+    console.error(`[Export] ${label} failed:`, e);
+    const detail = e?.response?.data?.error || e?.message || 'Unknown error';
+    showMsg(`Export failed: ${detail}`, 'error');
+  };
+
+  // ── Enrollment Export: Programme-wise (one sheet per programme) ────
   const handleExportEnrollment = async () => {
     try {
-      const r = await API.get('/admin/enrollment/export');
-      const data = r.data;
-      if (!data.length) { showMsg('No enrollment data to export', 'error'); return; }
+      const data = applyEnrollmentFilters(await fetchEnrollmentExportData());
+      if (!data.length) { showMsg('No enrollment data matches current filters', 'error'); return; }
 
       const wb = XLSX.utils.book_new();
       const programmes = [...new Set(data.map(d => d.programme_name))].sort();
@@ -228,87 +269,52 @@ export default function AdminDashboard({ admin, onLogout }) {
         if (!rows.length) return;
         const ws = XLSX.utils.json_to_sheet(rows);
         ws['!cols'] = Object.keys(rows[0]).map(k => ({ wch: Math.max(k.length + 2, 22) }));
-        XLSX.utils.book_append_sheet(wb, ws, prog.replace(/[\/\?*\[\]]/g,'').substring(0,31));
+        XLSX.utils.book_append_sheet(wb, ws, prog.replace(/[\/\?*\[\]]/g, '').substring(0, 31));
       });
 
-      XLSX.writeFile(wb, `Enrollment_Programme_${new Date().toLocaleDateString('en-IN').replace(/\//g,'-')}.xlsx`);
+      XLSX.writeFile(wb, `Enrollment_Programme_${todayStamp()}.xlsx`);
       showMsg('✅ Programme-wise export done!');
-    } catch(e) { showMsg('Export failed', 'error'); }
+    } catch (e) { logExportError('Programme-wise', e); }
   };
 
-  // Export: Semester-wise (one sheet per semester)
-  const handleExportSemesterWise = async () => {
+  // ── Enrollment Export: generic semester-grouped helper ─────────────
+  const exportSemesterGrouped = async (label, filterFn, filenamePrefix, sheetLabelFn, successMsg) => {
     try {
-      const r = await API.get('/admin/enrollment/export');
-      const data = r.data;
-      if (!data.length) { showMsg('No enrollment data to export', 'error'); return; }
+      const data = applyEnrollmentFilters(await fetchEnrollmentExportData()).filter(filterFn);
+      if (!data.length) { showMsg('No enrollment data matches current filters', 'error'); return; }
 
       const wb = XLSX.utils.book_new();
-      const semesters = [...new Set(data.map(d => d.semester))].sort((a,b) => a-b);
+      const semesters = [...new Set(data.map(d => d.semester))].sort((a, b) => a - b);
 
       semesters.forEach(sem => {
-        const semData = data.filter(d => d.semester === sem);
-        const rows = buildEnrollmentSheet(semData);
+        const rows = buildEnrollmentSheet(data.filter(d => d.semester === sem));
         if (!rows.length) return;
         const ws = XLSX.utils.json_to_sheet(rows);
         ws['!cols'] = Object.keys(rows[0]).map(k => ({ wch: Math.max(k.length + 2, 22) }));
-        XLSX.utils.book_append_sheet(wb, ws, `Semester ${sem}`);
+        XLSX.utils.book_append_sheet(wb, ws, sheetLabelFn(sem));
       });
 
-      XLSX.writeFile(wb, `Enrollment_Semester_${new Date().toLocaleDateString('en-IN').replace(/\//g,'-')}.xlsx`);
-      showMsg('✅ Semester-wise export done!');
-    } catch(e) { showMsg('Export failed', 'error'); }
+      XLSX.writeFile(wb, `${filenamePrefix}_${todayStamp()}.xlsx`);
+      showMsg(successMsg);
+    } catch (e) { logExportError(label, e); }
   };
 
-  // Export: Odd Semesters (1,3,5,7)
-  const handleExportOddSemesters = async () => {
-    try {
-      const r = await API.get('/admin/enrollment/export');
-      const data = r.data.filter(d => d.semester % 2 !== 0);
-      if (!data.length) { showMsg('No odd semester enrollment data', 'error'); return; }
+  const handleExportSemesterWise = () => exportSemesterGrouped(
+    'Semester-wise', () => true, 'Enrollment_Semester',
+    s => `Semester ${s}`, '✅ Semester-wise export done!'
+  );
 
-      const wb = XLSX.utils.book_new();
-      const semesters = [...new Set(data.map(d => d.semester))].sort((a,b) => a-b);
+  const handleExportOddSemesters = () => exportSemesterGrouped(
+    'Odd-Sem', d => d.semester % 2 !== 0, 'Enrollment_OddSem',
+    s => `Sem ${s} (Odd)`, '✅ Odd semester export done!'
+  );
 
-      semesters.forEach(sem => {
-        const semData = data.filter(d => d.semester === sem);
-        const rows = buildEnrollmentSheet(semData);
-        if (!rows.length) return;
-        const ws = XLSX.utils.json_to_sheet(rows);
-        ws['!cols'] = Object.keys(rows[0]).map(k => ({ wch: Math.max(k.length + 2, 22) }));
-        XLSX.utils.book_append_sheet(wb, ws, `Sem ${sem} (Odd)`);
-      });
+  const handleExportEvenSemesters = () => exportSemesterGrouped(
+    'Even-Sem', d => d.semester % 2 === 0, 'Enrollment_EvenSem',
+    s => `Sem ${s} (Even)`, '✅ Even semester export done!'
+  );
 
-      XLSX.writeFile(wb, `Enrollment_OddSem_${new Date().toLocaleDateString('en-IN').replace(/\//g,'-')}.xlsx`);
-      showMsg('✅ Odd semester export done!');
-    } catch(e) { showMsg('Export failed', 'error'); }
-  };
-
-  // Export: Even Semesters (2,4,6,8)
-  const handleExportEvenSemesters = async () => {
-    try {
-      const r = await API.get('/admin/enrollment/export');
-      const data = r.data.filter(d => d.semester % 2 === 0);
-      if (!data.length) { showMsg('No even semester enrollment data', 'error'); return; }
-
-      const wb = XLSX.utils.book_new();
-      const semesters = [...new Set(data.map(d => d.semester))].sort((a,b) => a-b);
-
-      semesters.forEach(sem => {
-        const semData = data.filter(d => d.semester === sem);
-        const rows = buildEnrollmentSheet(semData);
-        if (!rows.length) return;
-        const ws = XLSX.utils.json_to_sheet(rows);
-        ws['!cols'] = Object.keys(rows[0]).map(k => ({ wch: Math.max(k.length + 2, 22) }));
-        XLSX.utils.book_append_sheet(wb, ws, `Sem ${sem} (Even)`);
-      });
-
-      XLSX.writeFile(wb, `Enrollment_EvenSem_${new Date().toLocaleDateString('en-IN').replace(/\//g,'-')}.xlsx`);
-      showMsg('✅ Even semester export done!');
-    } catch(e) { showMsg('Export failed', 'error'); }
-  };
-
-  // Import enrollment from Excel
+  // ── Enrollment Import from Excel ───────────────────────────────────
   const handleImportEnrollment = async (e) => {
     const file = e.target.files[0]; if (!file) return; setImporting(true);
     try {
@@ -328,37 +334,46 @@ export default function AdminDashboard({ admin, onLogout }) {
       if (errors?.length) console.warn('Enrollment import errors:', errors);
       showMsg(`✅ Enrolled ${success} subjects${failed ? `, ❌ ${failed} students failed` : ''}`, failed ? 'warning' : 'success');
       fetchEnrollmentSummary();
-    } catch (err) { showMsg('Import failed: ' + (err.response?.data?.error || err.message), 'error'); }
-    finally { setImporting(false); e.target.value = ''; }
+    } catch (err) {
+      console.error('[Import] Enrollment failed:', err);
+      showMsg('Import failed: ' + (err.response?.data?.error || err.message), 'error');
+    } finally {
+      setImporting(false); e.target.value = '';
+    }
   };
 
-
-
-  // ── Enrollment Export Functions ──────────────────────────────────────────
+  // ── Enrollment Export: Summary (uses enrollmentSummary state) ──────
   const exportEnrollmentSummary = () => {
-    const rows = enrollmentSummary.map(s => ({
-      'Roll No': s.roll_no,
-      'Student Name': s.student_name,
-      'Programme': s.programme_name || '—',
-      'Level': s.level_name || '—',
-      'Semester': s.semester,
-      'Status': s.accepted > 0 ? 'Submitted' : s.total_enrolled > 0 ? 'Draft' : 'Not Enrolled',
-      'Total Enrolled': s.total_enrolled || 0,
-      'Accepted': s.accepted || 0,
-      'Rejected': s.rejected || 0,
-      'Pending': s.pending || 0,
-      'Admin Modified': s.admin_modified ? 'Yes' : 'No',
-    }));
-    const ws = XLSX.utils.json_to_sheet(rows);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Enrollment Summary');
-    XLSX.writeFile(wb, 'enrollment_summary.xlsx');
+    try {
+      if (!enrollmentSummary?.length) { showMsg('No summary data to export', 'error'); return; }
+      const rows = enrollmentSummary.map(s => ({
+        'Roll No': s.roll_no,
+        'Student Name': s.student_name,
+        'Programme': s.programme_name || '—',
+        'Level': s.level_name || '—',
+        'Semester': s.semester,
+        'Status': s.accepted > 0 ? 'Submitted' : s.total_enrolled > 0 ? 'Draft' : 'Not Enrolled',
+        'Total Enrolled': s.total_enrolled || 0,
+        'Accepted': s.accepted || 0,
+        'Rejected': s.rejected || 0,
+        'Pending': s.pending || 0,
+        'Admin Modified': s.admin_modified ? 'Yes' : 'No',
+      }));
+      const ws = XLSX.utils.json_to_sheet(rows);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Enrollment Summary');
+      XLSX.writeFile(wb, `Enrollment_Summary_${todayStamp()}.xlsx`);
+      showMsg('✅ Summary exported!');
+    } catch (e) { logExportError('Summary', e); }
   };
 
+  // ── Enrollment Export: Full Detail (one row per enrollment) ────────
   const exportEnrollmentDetail = async () => {
     try {
-      const r = await API.get('/admin/enrollment/export');
-      const rows = r.data.map(e => ({
+      const data = applyEnrollmentFilters(await fetchEnrollmentExportData());
+      if (!data.length) { showMsg('No enrollment data matches current filters', 'error'); return; }
+
+      const rows = data.map(e => ({
         'Roll No': e.roll_no,
         'Student Name': e.student_name,
         'Programme': e.programme_name || '—',
@@ -369,15 +384,17 @@ export default function AdminDashboard({ admin, onLogout }) {
         'Category': e.category,
         'Credits': e.credits,
         'Status': e.status || 'NOT ENROLLED',
-        'Is Major': e.is_major ? 'Yes' : 'No',
-        'Admin Modified': e.admin_modified ? 'Yes' : 'No',
+        'Is Major': e.is_major,
+        'Admin Modified': e.admin_modified,
         'Remarks': e.remarks || '',
       }));
       const ws = XLSX.utils.json_to_sheet(rows);
+      ws['!cols'] = Object.keys(rows[0]).map(k => ({ wch: Math.max(k.length + 2, 18) }));
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, 'Enrollment Detail');
-      XLSX.writeFile(wb, 'enrollment_detail.xlsx');
-    } catch(e) { showMsg('Failed to export', 'error'); }
+      XLSX.writeFile(wb, `Enrollment_Detail_${todayStamp()}.xlsx`);
+      showMsg('✅ Full detail exported!');
+    } catch (e) { logExportError('Full Detail', e); }
   };
 
   // ── Marks Export Functions ─────────────────────────────────────────────────
@@ -446,95 +463,59 @@ export default function AdminDashboard({ admin, onLogout }) {
       const programmes = [...new Set(data.map(d => d.programme_name))].sort();
       programmes.forEach(prog => {
         const progData = data.filter(d => d.programme_name === prog);
-        exportMarksToWorkbook(progData, `Marks_${prog.replace(/[^a-zA-Z0-9]/g,'_')}_${new Date().toLocaleDateString('en-IN').replace(/\//g,'-')}.xlsx`);
+        exportMarksToWorkbook(progData, `Marks_${prog.replace(/[^a-zA-Z0-9]/g,'_')}_${todayStamp()}.xlsx`);
       });
       showMsg(`✅ Marks exported for ${programmes.length} programme(s)!`);
-    } catch(e) { showMsg('Marks export failed', 'error'); }
+    } catch (e) { logExportError('Marks Programme-wise', e); }
   };
 
-  // Export marks semester-wise (one file, each semester has 3 sheets)
-  const exportMarksSemesterWise = async () => {
+  // ── Marks Export: generic semester-grouped helper ─────────────────
+  // Used by Semester-wise, Odd Sem, and Even Sem marks exports.
+  // One file, one sheet per (semester × exam type) combination.
+  const exportMarksSemesterGrouped = async (label, filterFn, filenamePrefix, successMsg) => {
     try {
       const r = await API.get('/admin/marks/export');
-      const data = r.data;
-      if (!data.length) { showMsg('No marks data to export', 'error'); return; }
+      const data = r.data.filter(filterFn);
+      if (!data.length) { showMsg(`No marks data for ${label}`, 'error'); return; }
+
       const wb = XLSX.utils.book_new();
       const examTypes = [
         { key: 'INTERNAL',           label: 'Internal Theory' },
         { key: 'PRACTICAL_INTERNAL', label: 'Practical Internal' },
         { key: 'ASSIGNMENT',         label: 'Assignment' },
       ];
-      const semesters = [...new Set(data.map(d => d.semester))].sort((a,b) => a-b);
+      const semesters = [...new Set(data.map(d => d.semester))].sort((a, b) => a - b);
+
       semesters.forEach(sem => {
         const semData = data.filter(d => d.semester === sem);
-        examTypes.forEach(({ key, label }) => {
+        examTypes.forEach(({ key, label: etLabel }) => {
           const rows = buildMarksSheetByType(semData, key);
           if (!rows.length) return;
           const ws = XLSX.utils.json_to_sheet(rows);
           ws['!cols'] = Object.keys(rows[0]).map(k => ({ wch: Math.max(k.length + 2, 16) }));
-          XLSX.utils.book_append_sheet(wb, ws, `Sem${sem}-${label.substring(0,18)}`);
+          XLSX.utils.book_append_sheet(wb, ws, `Sem${sem}-${etLabel.substring(0, 18)}`);
         });
       });
-      XLSX.writeFile(wb, `Marks_SemesterWise_${new Date().toLocaleDateString('en-IN').replace(/\//g,'-')}.xlsx`);
-      showMsg('✅ Semester-wise marks exported!');
-    } catch(e) { showMsg('Marks export failed', 'error'); }
+
+      XLSX.writeFile(wb, `${filenamePrefix}_${todayStamp()}.xlsx`);
+      showMsg(successMsg);
+    } catch (e) { logExportError(`Marks ${label}`, e); }
   };
 
-  // Export marks odd semesters
-  const exportMarksOddSem = async () => {
-    try {
-      const r = await API.get('/admin/marks/export');
-      const data = r.data.filter(d => d.semester % 2 !== 0);
-      if (!data.length) { showMsg('No odd semester marks data', 'error'); return; }
-      const wb = XLSX.utils.book_new();
-      const examTypes = [
-        { key: 'INTERNAL', label: 'Internal Theory' },
-        { key: 'PRACTICAL_INTERNAL', label: 'Practical Internal' },
-        { key: 'ASSIGNMENT', label: 'Assignment' },
-      ];
-      const semesters = [...new Set(data.map(d => d.semester))].sort((a,b) => a-b);
-      semesters.forEach(sem => {
-        const semData = data.filter(d => d.semester === sem);
-        examTypes.forEach(({ key, label }) => {
-          const rows = buildMarksSheetByType(semData, key);
-          if (!rows.length) return;
-          const ws = XLSX.utils.json_to_sheet(rows);
-          ws['!cols'] = Object.keys(rows[0]).map(k => ({ wch: Math.max(k.length + 2, 16) }));
-          XLSX.utils.book_append_sheet(wb, ws, `Sem${sem}-${label.substring(0,18)}`);
-        });
-      });
-      XLSX.writeFile(wb, `Marks_OddSem_${new Date().toLocaleDateString('en-IN').replace(/\//g,'-')}.xlsx`);
-      showMsg('✅ Odd semester marks exported!');
-    } catch(e) { showMsg('Marks export failed', 'error'); }
-  };
+  const exportMarksSemesterWise = () => exportMarksSemesterGrouped(
+    'Semester-wise', () => true, 'Marks_SemesterWise',
+    '✅ Semester-wise marks exported!'
+  );
 
-  // Export marks even semesters
-  const exportMarksEvenSem = async () => {
-    try {
-      const r = await API.get('/admin/marks/export');
-      const data = r.data.filter(d => d.semester % 2 === 0);
-      if (!data.length) { showMsg('No even semester marks data', 'error'); return; }
-      const wb = XLSX.utils.book_new();
-      const examTypes = [
-        { key: 'INTERNAL', label: 'Internal Theory' },
-        { key: 'PRACTICAL_INTERNAL', label: 'Practical Internal' },
-        { key: 'ASSIGNMENT', label: 'Assignment' },
-      ];
-      const semesters = [...new Set(data.map(d => d.semester))].sort((a,b) => a-b);
-      semesters.forEach(sem => {
-        const semData = data.filter(d => d.semester === sem);
-        examTypes.forEach(({ key, label }) => {
-          const rows = buildMarksSheetByType(semData, key);
-          if (!rows.length) return;
-          const ws = XLSX.utils.json_to_sheet(rows);
-          ws['!cols'] = Object.keys(rows[0]).map(k => ({ wch: Math.max(k.length + 2, 16) }));
-          XLSX.utils.book_append_sheet(wb, ws, `Sem${sem}-${label.substring(0,18)}`);
-        });
-      });
-      XLSX.writeFile(wb, `Marks_EvenSem_${new Date().toLocaleDateString('en-IN').replace(/\//g,'-')}.xlsx`);
-      showMsg('✅ Even semester marks exported!');
-    } catch(e) { showMsg('Marks export failed', 'error'); }
-  };
+  const exportMarksOddSem = () => exportMarksSemesterGrouped(
+    'Odd-Sem', d => d.semester % 2 !== 0, 'Marks_OddSem',
+    '✅ Odd semester marks exported!'
+  );
+
+  const exportMarksEvenSem = () => exportMarksSemesterGrouped(
+    'Even-Sem', d => d.semester % 2 === 0, 'Marks_EvenSem',
+    '✅ Even semester marks exported!'
+  );
 
   // Per-subject export: Excel + PDF for all students of one programme
   // Shows: Roll No, Name, Internal, Assignment, Practical Internal marks
@@ -592,7 +573,7 @@ export default function AdminDashboard({ admin, onLogout }) {
         XLSX.utils.book_append_sheet(wb, ws, sheetName);
       });
 
-      XLSX.writeFile(wb, `Marks_SubjectWise_${new Date().toLocaleDateString('en-IN').replace(/\//g,'-')}.xlsx`);
+      XLSX.writeFile(wb, `Marks_SubjectWise_${todayStamp()}.xlsx`);
 
       // PDF: one PDF per subject using printable HTML
       subjects.forEach(sub => {
@@ -751,7 +732,7 @@ export default function AdminDashboard({ admin, onLogout }) {
         XLSX.utils.book_append_sheet(wb, ws, prog.replace(/[\/\?*\[\]]/g,'').substring(0,31));
       });
 
-      XLSX.writeFile(wb, `Attendance_Programme_${new Date().toLocaleDateString('en-IN').replace(/\//g,'-')}.xlsx`);
+      XLSX.writeFile(wb, `Attendance_Programme_${todayStamp()}.xlsx`);
       showMsg('✅ Programme-wise attendance exported!');
     } catch(e) { showMsg('Attendance export failed', 'error'); }
   };
@@ -795,7 +776,7 @@ export default function AdminDashboard({ admin, onLogout }) {
         XLSX.utils.book_append_sheet(wb, ws, sub.subject_code.replace(/[\/\?*\[\]]/g,'').substring(0,31));
       });
 
-      XLSX.writeFile(wb, `Attendance_SubjectWise_${new Date().toLocaleDateString('en-IN').replace(/\//g,'-')}.xlsx`);
+      XLSX.writeFile(wb, `Attendance_SubjectWise_${todayStamp()}.xlsx`);
 
       // PDF — one per subject
       subjects.forEach(sub => {

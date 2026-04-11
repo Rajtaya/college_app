@@ -619,7 +619,10 @@ router.get('/enrollment/export', async (req, res) => {
   try {
     const [rows] = await db.query(`
       SELECT st.roll_no, CONCAT(st.first_name, ' ', st.last_name) AS student_name,
-             p.programme_name, l.level_name, st.semester,
+             p.programme_id, p.programme_name,
+             p.faculty_id, f.faculty_name,
+             p.level_id, l.level_name,
+             st.semester,
              sub.subject_code, sub.subject_name, sub.category, sub.credits,
              d.discipline_name,
              e.status,
@@ -630,6 +633,7 @@ router.get('/enrollment/export', async (req, res) => {
       JOIN student_subject_enrollment e ON st.student_id = e.student_id
       JOIN subjects sub ON e.subject_id = sub.subject_id
       LEFT JOIN programmes p ON st.programme_id = p.programme_id
+      LEFT JOIN faculties f ON p.faculty_id = f.faculty_id
       LEFT JOIN levels l ON st.level_id = l.level_id
       LEFT JOIN disciplines d ON sub.discipline_id = d.discipline_id
       WHERE e.status = 'ACCEPTED' AND e.is_draft = 0
